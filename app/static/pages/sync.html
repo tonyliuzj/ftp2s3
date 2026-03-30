@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sync</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <main class="content">
+        <header id="topbar" class="topbar"></header>
+        <div id="flash" class="flash"></div>
+        <section class="form-card">
+          <div class="toolbar">
+            <div class="field">
+              <label for="sync-bucket">Bucket</label>
+              <select id="sync-bucket"></select>
+            </div>
+            <div class="actions" style="align-self: end">
+              <button id="sync-preview" class="btn btn-secondary" type="button">Preview Sync</button>
+              <button id="sync-repair" class="btn btn-primary" type="button">Repair DB From FTP</button>
+              <button id="sync-refresh-status" class="btn btn-secondary" type="button">Refresh Status</button>
+            </div>
+          </div>
+          <div class="actions">
+            <div id="sync-status-pill"></div>
+            <div id="sync-status-detail" class="muted"></div>
+          </div>
+        </section>
+        <div style="height: 20px"></div>
+        <section id="sync-summary" class="card-grid"></section>
+        <div style="height: 20px"></div>
+        <section class="table-card">
+          <h3 class="section-title">FTP Only Files</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>FTP Object Key</th>
+                  <th>FTP Path</th>
+                  <th>DB Object Key</th>
+                  <th>DB FTP Path</th>
+                  <th>Size</th>
+                  <th>Last Modified</th>
+                </tr>
+              </thead>
+              <tbody id="ftp-only-table"></tbody>
+            </table>
+          </div>
+        </section>
+        <div style="height: 20px"></div>
+        <section class="table-card">
+          <h3 class="section-title">DB Only Rows</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>FTP Object Key</th>
+                  <th>FTP Path</th>
+                  <th>DB Object Key</th>
+                  <th>DB FTP Path</th>
+                  <th>Size</th>
+                  <th>Last Modified</th>
+                </tr>
+              </thead>
+              <tbody id="db-only-table"></tbody>
+            </table>
+          </div>
+        </section>
+        <div style="height: 20px"></div>
+        <section class="table-card">
+          <h3 class="section-title">Path Mismatches</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>FTP Object Key</th>
+                  <th>FTP Path</th>
+                  <th>DB Object Key</th>
+                  <th>DB FTP Path</th>
+                  <th>Size</th>
+                  <th>Last Modified</th>
+                </tr>
+              </thead>
+              <tbody id="path-mismatch-table"></tbody>
+            </table>
+          </div>
+        </section>
+        <div style="height: 20px"></div>
+        <section class="table-card">
+          <h3 class="section-title">Size Mismatches</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>FTP Object Key</th>
+                  <th>FTP Path</th>
+                  <th>DB Object Key</th>
+                  <th>DB FTP Path</th>
+                  <th>Size</th>
+                  <th>Last Modified</th>
+                </tr>
+              </thead>
+              <tbody id="size-mismatch-table"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/panel/js/sync.js"></script>
+  </body>
+  </html>

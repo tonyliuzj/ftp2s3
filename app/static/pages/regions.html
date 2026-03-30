@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Regions</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <main class="content">
+        <header id="topbar" class="topbar"></header>
+        <div id="flash" class="flash"></div>
+        <div class="two-column">
+          <section class="form-card">
+            <h3 class="section-title">Region Editor</h3>
+            <p class="section-subtitle">Manage the list of S3 regions that buckets and direct links can use.</p>
+            <form id="region-form" class="form-grid">
+              <input id="region-id" type="hidden" />
+              <div class="field">
+                <label for="region-code">Region Code</label>
+                <input
+                  id="region-code"
+                  name="code"
+                  minlength="3"
+                  maxlength="32"
+                  pattern="^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$"
+                  title="3-32 chars. Lowercase letters, numbers, and hyphens only. Must start and end with a letter or number."
+                  placeholder="us-east-1"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="region-name">Display Name</label>
+                <input id="region-name" name="name" placeholder="US East (N. Virginia)" required />
+              </div>
+              <div class="actions">
+                <button class="btn btn-primary" type="submit">Save Region</button>
+                <button id="region-reset" class="btn btn-secondary" type="button">Clear</button>
+              </div>
+            </form>
+          </section>
+          <section class="table-card">
+            <h3 class="section-title">Configured Regions</h3>
+            <p class="section-subtitle">Buckets pick from this catalog. The default S3 region is also selected from here.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Buckets</th>
+                    <th>Default</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="regions-table"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="/panel/js/regions.js"></script>
+  </body>
+  </html>

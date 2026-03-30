@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Search</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <main class="content">
+        <header id="topbar" class="topbar"></header>
+        <div id="flash" class="flash"></div>
+        <section class="form-card">
+          <form id="search-form" class="toolbar">
+            <div class="field">
+              <label for="search-bucket">Bucket</label>
+              <select id="search-bucket"></select>
+            </div>
+            <div class="field" style="min-width: 320px">
+              <label for="search-query">Search Query</label>
+              <input id="search-query" type="text" placeholder="logs/2026 or invoice.pdf" />
+            </div>
+            <div class="actions" style="align-self: end">
+              <button class="btn btn-primary" type="submit">Run Search</button>
+            </div>
+          </form>
+        </section>
+        <div style="height: 20px"></div>
+        <section class="table-card">
+          <h3 class="section-title">Search Results</h3>
+          <p class="section-subtitle">Results come from the indexed metadata, not from a live FTP directory scan.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Object Key</th>
+                  <th>FTP Path</th>
+                  <th>Size</th>
+                  <th>Last Modified</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="search-results"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/panel/js/search.js"></script>
+  </body>
+  </html>

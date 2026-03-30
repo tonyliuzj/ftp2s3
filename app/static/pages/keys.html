@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Keys</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <main class="content">
+        <header id="topbar" class="topbar"></header>
+        <div id="flash" class="flash"></div>
+        <div class="two-column">
+          <section class="form-card">
+            <h3 class="section-title">Access Key Editor</h3>
+            <p class="section-subtitle">Create multiple S3 access keys. The secret is shown only when you create or rotate it.</p>
+            <form id="key-form" class="form-grid">
+              <input id="key-id" type="hidden" />
+              <div class="field">
+                <label for="key-name">Key Name</label>
+                <input id="key-name" name="name" required />
+              </div>
+              <div class="field">
+                <label for="key-access-key-id">Access Key ID</label>
+                <input id="key-access-key-id" name="access_key_id" placeholder="Optional: auto-generated if empty" />
+              </div>
+              <div class="field">
+                <label for="key-secret-access-key">Secret Access Key</label>
+                <input id="key-secret-access-key" name="secret_access_key" placeholder="Optional: auto-generated if empty" />
+              </div>
+              <label class="field-inline">
+                <input id="key-enabled" name="enabled" type="checkbox" checked />
+                <span>Key enabled</span>
+              </label>
+              <label class="field-inline">
+                <input id="key-default" name="is_default" type="checkbox" />
+                <span>Use as the default presign key</span>
+              </label>
+              <div class="actions">
+                <button class="btn btn-primary" type="submit">Save Key</button>
+                <button id="key-reset" class="btn btn-secondary" type="button">Clear</button>
+              </div>
+            </form>
+            <div style="height: 18px"></div>
+            <div id="key-secret-panel" class="hero-card" hidden>
+              <h3 class="section-title">New Secret</h3>
+              <p class="section-subtitle">Copy this now. The full secret is not listed later.</p>
+              <div class="code-box" id="key-secret-access-key-preview"></div>
+              <div class="actions">
+                <button id="copy-key-id" class="btn btn-secondary" type="button">Copy Access Key ID</button>
+                <button id="copy-key-secret" class="btn btn-primary" type="button">Copy Secret</button>
+              </div>
+            </div>
+          </section>
+          <section class="table-card">
+            <h3 class="section-title">Configured Keys</h3>
+            <p class="section-subtitle">Any enabled key can authenticate S3 requests. One enabled key can be marked as the default for presigned links.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Access Key ID</th>
+                    <th>Secret</th>
+                    <th>Status</th>
+                    <th>Default</th>
+                    <th>Last Used</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="keys-table"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="/panel/js/keys.js"></script>
+  </body>
+  </html>

@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Dashboard</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <main class="content">
+        <header id="topbar" class="topbar"></header>
+        <div id="flash" class="flash"></div>
+        <section id="stats" class="card-grid"></section>
+        <div style="height: 20px"></div>
+        <section id="runtime-info"></section>
+        <div style="height: 20px"></div>
+        <section class="table-card">
+          <h3 class="section-title">Recent Sync Activity</h3>
+          <p class="section-subtitle">The panel tracks the latest preview or repair action per bucket.</p>
+          <div id="sync-list"></div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/panel/js/dashboard.js"></script>
+  </body>
+  </html>

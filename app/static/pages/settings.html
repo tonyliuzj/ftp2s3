@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Settings</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <main class="content">
+        <header id="topbar" class="topbar"></header>
+        <div id="flash" class="flash"></div>
+
+        <div class="two-column">
+          <section class="form-card">
+            <h3 class="section-title">S3 Settings</h3>
+            <p class="section-subtitle">Control the public endpoint metadata, default region, signing rules, and direct-link behavior.</p>
+            <form id="settings-form" class="form-grid">
+              <div class="field">
+                <label for="public-base-url">Public Base URL</label>
+                <input id="public-base-url" name="public_base_url" placeholder="https://files.example.com" required />
+              </div>
+              <div class="field">
+                <label for="s3-service-name">Service Name</label>
+                <input id="s3-service-name" name="s3_service_name" value="s3" required />
+              </div>
+              <div class="field">
+                <label for="s3-default-region">Default Region</label>
+                <select id="s3-default-region" name="s3_default_region" required></select>
+              </div>
+              <div class="field">
+                <label for="s3-max-clock-skew-seconds">Max Clock Skew Seconds</label>
+                <input id="s3-max-clock-skew-seconds" name="s3_max_clock_skew_seconds" type="number" min="0" max="3600" value="900" required />
+              </div>
+              <div class="field">
+                <label for="s3-presign-expiry-seconds">Default Presign Expiry Seconds</label>
+                <input id="s3-presign-expiry-seconds" name="s3_presign_expiry_seconds" type="number" min="60" max="604800" value="3600" required />
+              </div>
+              <label class="field-inline">
+                <input id="s3-require-sigv4" name="s3_require_sigv4" type="checkbox" checked />
+                <span>Require SigV4 or presigned X-Amz auth</span>
+              </label>
+              <div class="actions">
+                <button class="btn btn-primary" type="submit">Save Settings</button>
+              </div>
+            </form>
+          </section>
+
+          <section class="hero-card">
+            <h3 class="section-title">Direct Link Shape</h3>
+            <p>The app generates S3-style presigned links with X-Amz query parameters. They stay path-style so routing remains simple.</p>
+            <div class="code-box" id="settings-link-example"></div>
+            <div class="muted" id="settings-summary"></div>
+          </section>
+        </div>
+
+        <div style="height: 20px"></div>
+
+        <section class="hero-card">
+          <div class="actions">
+            <button id="status-refresh" class="btn btn-secondary" type="button">Refresh Status</button>
+            <button id="status-rescan-all" class="btn btn-primary" type="button">Rescan All Buckets</button>
+          </div>
+          <h3 class="section-title">System Status</h3>
+          <div class="muted">S3 endpoint URL: <span id="endpoint-url"></span></div>
+          <div class="muted">Default region: <span id="endpoint-region"></span></div>
+          <div class="muted">Access key ID: <span id="endpoint-access-key"></span></div>
+          <div class="muted">Auth mode: <span id="endpoint-auth-mode"></span></div>
+          <div class="muted">Presign expiry: <span id="endpoint-presign-expiry"></span></div>
+        </section>
+
+        <div style="height: 20px"></div>
+
+        <section id="status-cards" class="card-grid"></section>
+
+        <div style="height: 20px"></div>
+
+        <section class="table-card">
+          <h3 class="section-title">Bucket Sync Status</h3>
+          <p class="section-subtitle">Latest recorded preview or repair activity for each bucket.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Bucket</th>
+                  <th>Action</th>
+                  <th>Status</th>
+                  <th>Updated</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody id="status-sync-table"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div style="height: 20px"></div>
+
+        <section class="form-card">
+          <h3 class="section-title">Bucket Sync Tools</h3>
+          <p class="section-subtitle">Preview and repair one bucket at a time, with FTP treated as the source of truth.</p>
+          <div class="toolbar">
+            <div class="field">
+              <label for="sync-bucket">Bucket</label>
+              <select id="sync-bucket"></select>
+            </div>
+            <div class="actions" style="align-self: end">
+              <button id="sync-preview" class="btn btn-secondary" type="button">Preview Sync</button>
+              <button id="sync-repair" class="btn btn-primary" type="button">Repair DB From FTP</button>
+              <button id="sync-refresh-status" class="btn btn-secondary" type="button">Refresh Status</button>
+            </div>
+          </div>
+          <div class="actions">
+            <div id="sync-status-pill"></div>
+            <div id="sync-status-detail" class="muted"></div>
+          </div>
+        </section>
+
+        <div style="height: 20px"></div>
+
+        <section id="sync-summary" class="card-grid"></section>
+
+        <div style="height: 20px"></div>
+
+        <section class="table-card">
+          <h3 class="section-title">FTP Only Files</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>FTP Object Key</th>
+                  <th>FTP Path</th>
+                  <th>DB Object Key</th>
+                  <th>DB FTP Path</th>
+                  <th>Size</th>
+                  <th>Last Modified</th>
+                </tr>
+              </thead>
+              <tbody id="ftp-only-table"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div style="height: 20px"></div>
+
+        <section class="table-card">
+          <h3 class="section-title">DB Only Rows</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>FTP Object Key</th>
+                  <th>FTP Path</th>
+                  <th>DB Object Key</th>
+                  <th>DB FTP Path</th>
+                  <th>Size</th>
+                  <th>Last Modified</th>
+                </tr>
+              </thead>
+              <tbody id="db-only-table"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div style="height: 20px"></div>
+
+        <section class="table-card">
+          <h3 class="section-title">Path Mismatches</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>FTP Object Key</th>
+                  <th>FTP Path</th>
+                  <th>DB Object Key</th>
+                  <th>DB FTP Path</th>
+                  <th>Size</th>
+                  <th>Last Modified</th>
+                </tr>
+              </thead>
+              <tbody id="path-mismatch-table"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div style="height: 20px"></div>
+
+        <section class="table-card">
+          <h3 class="section-title">Size Mismatches</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>FTP Object Key</th>
+                  <th>FTP Path</th>
+                  <th>DB Object Key</th>
+                  <th>DB FTP Path</th>
+                  <th>Size</th>
+                  <th>Last Modified</th>
+                </tr>
+              </thead>
+              <tbody id="size-mismatch-table"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div style="height: 20px"></div>
+
+        <section class="form-card">
+          <h3 class="section-title">Zone Sync Tools</h3>
+          <p class="section-subtitle">Compare the selected bucket's zone strategy against the actual files stored on that zone's FTP servers.</p>
+          <div class="toolbar">
+            <div class="field">
+              <label for="zone-sync-bucket">Bucket</label>
+              <select id="zone-sync-bucket"></select>
+            </div>
+            <div class="actions" style="align-self: end">
+              <button id="zone-sync-preview" class="btn btn-secondary" type="button">Preview Zone Sync</button>
+              <button id="zone-sync-repair" class="btn btn-primary" type="button">Repair Zone Sync</button>
+            </div>
+          </div>
+        </section>
+
+        <div style="height: 20px"></div>
+
+        <section id="zone-sync-summary" class="card-grid"></section>
+
+        <div style="height: 20px"></div>
+
+        <section class="table-card">
+          <h3 class="section-title">Missing Objects</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Object Key</th>
+                  <th>FTP Path</th>
+                  <th>Zone</th>
+                  <th>Expected Server</th>
+                  <th>Actual Servers</th>
+                  <th>Detail</th>
+                </tr>
+              </thead>
+              <tbody id="zone-sync-missing-objects-table"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div style="height: 20px"></div>
+
+        <section class="table-card">
+          <h3 class="section-title">Missing Expected Copies</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Object Key</th>
+                  <th>FTP Path</th>
+                  <th>Zone</th>
+                  <th>Expected Server</th>
+                  <th>Actual Servers</th>
+                  <th>Detail</th>
+                </tr>
+              </thead>
+              <tbody id="zone-sync-missing-expected-table"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div style="height: 20px"></div>
+
+        <section class="table-card">
+          <h3 class="section-title">Unexpected Copies</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Object Key</th>
+                  <th>FTP Path</th>
+                  <th>Zone</th>
+                  <th>Expected Server</th>
+                  <th>Actual Servers</th>
+                  <th>Detail</th>
+                </tr>
+              </thead>
+              <tbody id="zone-sync-unexpected-table"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <div style="height: 20px"></div>
+
+        <section class="table-card">
+          <h3 class="section-title">Replica Metadata Drift</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Object Key</th>
+                  <th>FTP Path</th>
+                  <th>Zone</th>
+                  <th>Expected Server</th>
+                  <th>Actual Servers</th>
+                  <th>Detail</th>
+                </tr>
+              </thead>
+              <tbody id="zone-sync-db-mismatch-table"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/panel/js/settings.js"></script>
+  </body>
+  </html>

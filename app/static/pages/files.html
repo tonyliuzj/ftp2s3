@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>File Browser</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <main class="content">
+        <header id="topbar" class="topbar"></header>
+        <div id="flash" class="flash"></div>
+        <section class="form-card">
+          <form id="files-search-form" class="toolbar">
+            <div class="field">
+              <label for="files-bucket">Bucket</label>
+              <select id="files-bucket"></select>
+            </div>
+            <div class="field" style="min-width: 320px">
+              <label for="files-search-query">Search Object Key or FTP Path</label>
+              <input id="files-search-query" type="text" placeholder="invoice.pdf or logs/2026" />
+            </div>
+            <div class="actions" style="align-self: end">
+              <button id="files-search-submit" class="btn btn-primary" type="submit">Search</button>
+              <button id="files-search-clear" class="btn btn-secondary" type="button">Clear Search</button>
+              <button id="files-refresh" class="btn btn-secondary" type="button">Refresh Listing</button>
+            </div>
+          </form>
+          <div id="files-breadcrumbs" class="breadcrumb"></div>
+          <div id="files-mode-hint" class="muted"></div>
+          <form id="upload-form" class="form-grid">
+            <div class="field">
+              <label for="upload-file">Upload File</label>
+              <input id="upload-file" type="file" required />
+            </div>
+            <div class="field">
+              <label for="upload-object-key">Object Key Override</label>
+              <input id="upload-object-key" type="text" placeholder="Optional: folder/example.txt" />
+            </div>
+            <div class="muted" id="upload-path-hint"></div>
+            <div id="upload-progress" class="progress-panel" hidden>
+              <div class="progress-row">
+                <span id="upload-progress-label">Uploading...</span>
+                <span id="upload-progress-value">0%</span>
+              </div>
+              <div class="progress-track">
+                <div id="upload-progress-bar" class="progress-fill"></div>
+              </div>
+            </div>
+            <div id="upload-link-result" class="muted"></div>
+            <div class="actions">
+              <button id="upload-submit" class="btn btn-primary" type="submit">Upload to FTP</button>
+            </div>
+          </form>
+        </section>
+        <div style="height: 20px"></div>
+        <section class="table-card">
+          <h3 id="files-results-title" class="section-title">Indexed Files</h3>
+          <p id="files-results-subtitle" class="section-subtitle">Folders are derived from object key prefixes stored in the database index.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Object Key / FTP Path</th>
+                  <th>Size</th>
+                  <th>Last Modified</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="files-table"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/panel/js/files.js"></script>
+  </body>
+  </html>

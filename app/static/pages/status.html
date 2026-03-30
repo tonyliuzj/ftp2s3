@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>System Status</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <main class="content">
+        <header id="topbar" class="topbar"></header>
+        <div id="flash" class="flash"></div>
+        <section class="hero-card">
+          <div class="actions">
+            <button id="status-refresh" class="btn btn-secondary" type="button">Refresh Status</button>
+            <button id="status-rescan-all" class="btn btn-primary" type="button">Rescan All Buckets</button>
+          </div>
+          <div class="muted">Database URL: <span id="database-url"></span></div>
+          <div class="muted">S3 endpoint URL: <span id="endpoint-url"></span></div>
+          <div class="muted">Default region: <span id="endpoint-region"></span></div>
+          <div class="muted">Access key ID: <span id="endpoint-access-key"></span></div>
+          <div class="muted">Auth mode: <span id="endpoint-auth-mode"></span></div>
+          <div class="muted">Presign expiry: <span id="endpoint-presign-expiry"></span></div>
+        </section>
+        <div style="height: 20px"></div>
+        <section id="status-cards" class="card-grid"></section>
+        <div style="height: 20px"></div>
+        <section class="table-card">
+          <h3 class="section-title">Bucket Sync Status</h3>
+          <p class="section-subtitle">Latest recorded preview or repair activity for each bucket.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Bucket</th>
+                  <th>Action</th>
+                  <th>Status</th>
+                  <th>Updated</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody id="status-sync-table"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/panel/js/status.js"></script>
+  </body>
+  </html>

@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zones</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <main class="content">
+        <header id="topbar" class="topbar"></header>
+        <div id="flash" class="flash"></div>
+        <div class="two-column">
+          <section class="form-card">
+            <h3 class="section-title">Zone Editor</h3>
+            <p class="section-subtitle">A zone can pool multiple FTP servers. Choose whether uploads fill the list, rotate around it, or mirror to every server in the same zone.</p>
+            <form id="zone-form" class="form-grid">
+              <input id="zone-id" type="hidden" />
+              <div class="field">
+                <label for="zone-name">Zone Name</label>
+                <input id="zone-name" name="name" required />
+              </div>
+              <div class="field">
+                <label for="zone-pool-strategy">Pool Strategy</label>
+                <select id="zone-pool-strategy" name="pool_strategy">
+                  <option value="fill_first">Fill First</option>
+                  <option value="round_robin">Round Robin</option>
+                  <option value="mirror_all">Mirror All Servers</option>
+                </select>
+              </div>
+              <label class="field-inline">
+                <input id="zone-enabled" name="enabled" type="checkbox" checked />
+                <span>Zone enabled</span>
+              </label>
+
+              <div class="hero-card">
+                <div class="actions" style="justify-content: space-between">
+                  <div>
+                    <h3 class="section-title">FTP Servers</h3>
+                    <p class="section-subtitle">Order matters for Fill First and Round Robin. Mirror All writes the same path to every enabled server in this list.</p>
+                  </div>
+                  <button id="zone-add-server" class="btn btn-secondary" type="button">Add Server</button>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Name</th>
+                        <th>Host</th>
+                        <th>Port</th>
+                        <th>User</th>
+                        <th>Password</th>
+                        <th>Capacity</th>
+                        <th>Status</th>
+                        <th>Order</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="zone-servers-editor"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="actions">
+                <button class="btn btn-primary" type="submit">Save Zone</button>
+                <button id="zone-reset" class="btn btn-secondary" type="button">Clear</button>
+              </div>
+            </form>
+          </section>
+          <section class="table-card">
+            <h3 class="section-title">Configured Zones</h3>
+            <p class="section-subtitle">Buckets point at zones. Each zone decides whether its FTP servers act like a pool or as mirrored copies of the same files.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Strategy</th>
+                    <th>Servers</th>
+                    <th>Buckets</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="zones-table"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="/panel/js/zones.js"></script>
+  </body>
+  </html>

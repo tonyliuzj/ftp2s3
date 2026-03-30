@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Buckets</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside id="sidebar" class="sidebar"></aside>
+      <main class="content">
+        <header id="topbar" class="topbar"></header>
+        <div id="flash" class="flash"></div>
+        <div class="two-column">
+          <section class="form-card">
+            <h3 class="section-title">Bucket Editor</h3>
+            <p class="section-subtitle">Bucket to zone to FTP routing starts here.</p>
+            <div id="bucket-form-warning" class="flash"></div>
+            <form id="bucket-form" class="form-grid">
+              <input id="bucket-id" type="hidden" />
+              <div class="field">
+                <label for="bucket-name">Bucket Name</label>
+                <input
+                  id="bucket-name"
+                  name="name"
+                  minlength="3"
+                  maxlength="63"
+                  pattern="^[a-z0-9](?:[a-z0-9.-]{1,61}[a-z0-9])$"
+                  title="3-63 chars. Lowercase letters, numbers, dots, and hyphens only. Must start and end with a letter or number."
+                  required
+                />
+              </div>
+              <div class="field">
+                <label for="bucket-zone">Zone</label>
+                <select id="bucket-zone" name="zone_id" required></select>
+              </div>
+              <div class="field">
+                <label for="bucket-base-dir">FTP Base Directory</label>
+                <input id="bucket-base-dir" name="base_dir" value="/" required />
+              </div>
+              <div class="field">
+                <label for="bucket-region">Bucket Region</label>
+                <select id="bucket-region" name="region" required></select>
+              </div>
+              <label class="field-inline">
+                <input id="bucket-enabled" name="enabled" type="checkbox" checked />
+                <span>Bucket enabled</span>
+              </label>
+              <div class="actions">
+                <button class="btn btn-primary" type="submit">Save Bucket</button>
+                <button id="bucket-reset" class="btn btn-secondary" type="button">Clear</button>
+              </div>
+            </form>
+            <p class="muted">Bucket names must be DNS-compliant: 3-63 chars, lowercase letters, numbers, dots, and hyphens only. Regions now come from the Regions page.</p>
+          </section>
+          <section class="table-card">
+            <h3 class="section-title">Configured Buckets</h3>
+            <p class="section-subtitle">Each bucket writes under its base directory on its assigned FTP server.</p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Region</th>
+                    <th>Zone</th>
+                    <th>Base Directory</th>
+                    <th>Objects</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="buckets-table"></tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+    <script type="module" src="/panel/js/buckets.js"></script>
+  </body>
+  </html>

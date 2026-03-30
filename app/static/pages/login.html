@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ftp2s3 Login</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body class="login-page">
+    <div class="login-card">
+      <span class="eyebrow">Admin Panel</span>
+      <h1>ftp2s3</h1>
+      <p>Static HTML, CSS, and JavaScript frontend. Session login protects the admin APIs.</p>
+      <div id="flash" class="flash"></div>
+      <form id="login-form" class="form-grid">
+        <div class="field">
+          <label for="username">Username</label>
+          <input id="username" name="username" autocomplete="username" required />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" autocomplete="current-password" required />
+        </div>
+        <button class="btn btn-primary" type="submit">Log In</button>
+      </form>
+      <p class="muted">Default credentials come from `DEFAULT_ADMIN_USERNAME` and `DEFAULT_ADMIN_PASSWORD`.</p>
+    </div>
+    <script type="module" src="/panel/js/login.js"></script>
+  </body>
+  </html>
