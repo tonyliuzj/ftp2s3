@@ -60,7 +60,7 @@ curl -sSL https://github.com/tonyliuzj/ftp2s3/releases/latest/download/ftp2s3.sh
 The installer supports:
 
 - Direct install: Python + `systemd`
-- Docker install: app container via `docker-compose.yml`, with optional local PostgreSQL via `postgres/docker-compose.yml`
+- Docker install: app container via `docker-compose.yml`, with optional local PostgreSQL via `postgresql/docker-compose.yml`
 
 ## Docker Compose
 
@@ -95,7 +95,7 @@ docker compose up -d --build
 Use local Docker PostgreSQL:
 
 ```bash
-docker compose -f docker-compose.yml -f postgres/docker-compose.yml up -d --build
+docker compose -f docker-compose.yml -f postgresql/docker-compose.yml up -d --build
 ```
 
 4. Open the admin panel and complete first-run setup:
@@ -184,7 +184,7 @@ app/
   schemas.py
 Dockerfile
 docker-compose.yml
-postgres/docker-compose.yml
+postgresql/docker-compose.yml
 requirements.txt
 ftp2s3.sh
 ```
