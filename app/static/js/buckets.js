@@ -220,7 +220,9 @@ function isValidRegion(value) {
   return value.length >= 3 && value.length <= 32 && REGION_PATTERN.test(value);
 }
 
-await initializePage("buckets", "Buckets", "Buckets belong to zones, pick their region from the shared catalog, and write under a configured FTP base directory.");
+await initializePage("buckets", "Buckets", "Buckets belong to zones, pick their region from the shared catalog, and write under a configured FTP base directory.", {
+  requiresObjectDatabase: true,
+});
 const [zones, regions] = await Promise.all([loadZones(), loadRegions()]);
 currentRegions = regions;
 fillZoneOptions(zones);

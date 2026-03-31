@@ -126,6 +126,10 @@ select {
   transform: translateX(2px);
 }
 
+.nav-link.disabled {
+  opacity: 0.6;
+}
+
 .sidebar-spacer {
   height: 28px;
 }
@@ -259,6 +263,13 @@ select {
 .section-title {
   margin: 0 0 6px;
   font-size: 20px;
+}
+
+.section-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .section-subtitle {

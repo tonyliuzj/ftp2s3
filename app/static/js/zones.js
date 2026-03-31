@@ -235,6 +235,9 @@ await initializePage(
   "zones",
   "Zones",
   "Each zone can fill servers in order, rotate uploads across them, or mirror every upload to all enabled servers in the zone.",
+  {
+    requiresObjectDatabase: true,
+  },
 );
 await refreshZones();
 fillForm(null);

@@ -1,12 +1,14 @@
 const navItems = [
-  { key: "dashboard", label: "Dashboard", href: "/panel/pages/dashboard.html" },
-  { key: "settings", label: "Settings", href: "/panel/pages/settings.html" },
-  { key: "regions", label: "Regions", href: "/panel/pages/regions.html" },
-  { key: "keys", label: "Keys", href: "/panel/pages/keys.html" },
-  { key: "zones", label: "Zones", href: "/panel/pages/zones.html" },
-  { key: "buckets", label: "Buckets", href: "/panel/pages/buckets.html" },
-  { key: "files", label: "File Browser", href: "/panel/pages/files.html" },
+  { key: "dashboard", label: "Dashboard", href: "/panel/pages/dashboard.html", requiresObjectDatabase: false },
+  { key: "settings", label: "Settings", href: "/panel/pages/settings.html", requiresObjectDatabase: false },
+  { key: "regions", label: "Regions", href: "/panel/pages/regions.html", requiresObjectDatabase: true },
+  { key: "keys", label: "Keys", href: "/panel/pages/keys.html", requiresObjectDatabase: true },
+  { key: "zones", label: "Zones", href: "/panel/pages/zones.html", requiresObjectDatabase: true },
+  { key: "buckets", label: "Buckets", href: "/panel/pages/buckets.html", requiresObjectDatabase: true },
+  { key: "files", label: "File Browser", href: "/panel/pages/files.html", requiresObjectDatabase: true },
 ];
+
+let cachedSystemStatus = null;
 
 export async function apiFetch(path, options = {}) {
   const requestOptions = { credentials: "same-origin", ...options };
@@ -283,10 +285,26 @@ export async function logout() {
   window.location.href = "/panel/pages/login.html";
 }
 
-export async function initializePage(pageKey, title, subtitle) {
+export async function initializePage(pageKey, title, subtitle, options = {}) {
   const user = await requireAuth(true);
-  renderShell(pageKey, title, subtitle, user);
-  return user;
+  let status = null;
+  try {
+    status = await loadSystemStatus();
+  } catch (_error) {
+    status = null;
+  }
+
+  renderShell(pageKey, title, subtitle, user, status);
+
+  const page = navItems.find((item) => item.key === pageKey);
+  if ((options.requiresObjectDatabase || page?.requiresObjectDatabase) && status && !status.object_database_available) {
+    const target = new URL("/panel/pages/settings.html", window.location.origin);
+    target.searchParams.set("object-db", "unavailable");
+    window.location.replace(target.toString());
+    throw new Error(status.object_database_error || "Object metadata database is unavailable.");
+  }
+
+  return { user, status };
 }
 
 export async function loadZones() {
@@ -299,6 +317,15 @@ export async function loadRegions() {
 
 export async function loadBuckets() {
   return apiFetch("/admin/buckets");
+}
+
+export async function loadSystemStatus(force = false) {
+  if (cachedSystemStatus && !force) {
+    return cachedSystemStatus;
+  }
+
+  cachedSystemStatus = await apiFetch("/admin/system/status");
+  return cachedSystemStatus;
 }
 
 export function renderBreadcrumbs(prefix) {
@@ -321,9 +348,10 @@ export function renderTableRows(container, rowsHtml, emptyMessage = "No rows yet
   container.innerHTML = rowsHtml || `<tr><td colspan="99"><div class="empty-state">${escapeHtml(emptyMessage)}</div></td></tr>`;
 }
 
-function renderShell(pageKey, title, subtitle, user) {
+function renderShell(pageKey, title, subtitle, user, status = null) {
   const sidebar = document.getElementById("sidebar");
   const topbar = document.getElementById("topbar");
+  const objectDatabaseAvailable = !status || status.object_database_available !== false;
 
   if (sidebar) {
     sidebar.innerHTML = `
@@ -336,7 +364,10 @@ function renderShell(pageKey, title, subtitle, user) {
         ${navItems
           .map(
             (item) => `
-              <a class="nav-link ${item.key === pageKey ? "active" : ""}" href="${item.href}">
+              <a
+                class="nav-link ${item.key === pageKey ? "active" : ""} ${!objectDatabaseAvailable && item.requiresObjectDatabase ? "disabled" : ""}"
+                href="${!objectDatabaseAvailable && item.requiresObjectDatabase ? "/panel/pages/settings.html?object-db=unavailable" : item.href}"
+              >
                 <span>${item.label}</span>
               </a>
             `,

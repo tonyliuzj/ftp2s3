@@ -1,6 +1,6 @@
 # ftp2s3
 
-`ftp2s3` exposes a simplified S3-style API on top of one or more FTP servers. File bytes live on FTP, while PostgreSQL stores searchable metadata for the admin panel, bucket management, sync, and reconciliation.
+`ftp2s3` exposes a simplified S3-style API on top of one or more FTP servers. File bytes live on FTP, PostgreSQL stores all S3 and object metadata, and SQLite stores only local panel data such as admin logins and site settings.
 
 ## Local Run
 
@@ -23,18 +23,19 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-4. Update `.env` with a valid PostgreSQL connection string.
+4. Update `.env` with the local SQLite path and the PostgreSQL object metadata connection string.
 
 Example:
 
 ```env
-DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/ftp2s3
+APP_DATABASE_URL=sqlite:///./data/app.db
+OBJECT_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/ftp2s3
 PUBLIC_BASE_URL=http://localhost:8000
 DEFAULT_ADMIN_USERNAME=admin
 DEFAULT_ADMIN_PASSWORD=admin123
 ```
 
-5. Start PostgreSQL and create the database named in `DATABASE_URL`.
+5. Start PostgreSQL and create the database named in `OBJECT_DATABASE_URL`.
 
 6. Start the app.
 
@@ -75,7 +76,8 @@ Example:
 
 ```env
 APP_HOST_PORT=8000
-DATABASE_URL=postgresql+psycopg://ftp2s3:change-me@postgres:5432/ftp2s3
+APP_DATABASE_URL=sqlite:////app/data/app.db
+OBJECT_DATABASE_URL=postgresql+psycopg://ftp2s3:change-me@postgres:5432/ftp2s3
 POSTGRES_DB=ftp2s3
 POSTGRES_USER=ftp2s3
 POSTGRES_PASSWORD=change-me
@@ -98,7 +100,8 @@ docker compose up -d --build
 - FastAPI backend with a simplified S3-style API
 - Multiple zones with pooled or mirrored FTP servers
 - Bucket-to-zone mapping
-- PostgreSQL-backed metadata and admin state
+- PostgreSQL-backed S3, bucket, zone, key, and object metadata
+- SQLite-backed admin login and local site settings
 - Managed access keys for S3-style auth
 - Static admin panel built with HTML, CSS, and vanilla JavaScript
 - Sync and reconciliation tools with FTP treated as the source of truth

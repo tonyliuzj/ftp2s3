@@ -14,7 +14,7 @@ from app.api.admin import router as admin_router
 from app.api.s3 import router as s3_router
 from app.bootstrap import ensure_default_access_key, ensure_default_admin, ensure_default_regions
 from app.config import settings
-from app.database import init_db
+from app.database import ObjectDatabaseUnavailableError, init_db
 
 
 logging.basicConfig(
@@ -74,6 +74,17 @@ async def handle_request_validation_error(_request, exc: RequestValidationError)
             "message": "Please fix the highlighted fields and try again.",
             "detail": messages[0] if len(messages) == 1 else " | ".join(messages),
             "errors": messages,
+        },
+    )
+
+
+@app.exception_handler(ObjectDatabaseUnavailableError)
+async def handle_object_database_unavailable(_request, exc: ObjectDatabaseUnavailableError) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "message": "Object metadata database is unavailable.",
+            "detail": str(exc),
         },
     )
 

@@ -523,13 +523,16 @@ configure_existing_postgresql() {
   local env_path="${INSTALL_DIR}/${ENV_FILE_NAME}"
   local existing_database_url default_database_url
 
-  existing_database_url="$(get_env_value "${env_path}" "DATABASE_URL")"
+  existing_database_url="$(get_env_value "${env_path}" "OBJECT_DATABASE_URL")"
+  if [ -z "${existing_database_url}" ]; then
+    existing_database_url="$(get_env_value "${env_path}" "DATABASE_URL")"
+  fi
   if [ -z "${existing_database_url}" ]; then
     existing_database_url="postgresql+psycopg://postgres:postgres@localhost:5432/${PROJECT_SLUG}"
   fi
 
   default_database_url="${existing_database_url}"
-  DATABASE_URL="$(prompt_with_default "Enter the DATABASE_URL to use" "${default_database_url}")"
+  DATABASE_URL="$(prompt_with_default "Enter the OBJECT_DATABASE_URL to use" "${default_database_url}")"
   POSTGRES_MODE="existing"
   POSTGRES_SERVICE_NAME=""
 
@@ -572,19 +575,24 @@ write_env_file() {
   local install_mode="$1"
   local env_path="${INSTALL_DIR}/${ENV_FILE_NAME}"
   local runtime_port
+  local app_database_url
 
   if [ "${install_mode}" = "docker" ]; then
     runtime_port="${DOCKER_INTERNAL_PORT}"
+    app_database_url="sqlite:////app/data/app.db"
   else
     runtime_port="${APP_PORT}"
+    app_database_url="sqlite:///${INSTALL_DIR}/data/app.db"
   fi
 
   ensure_env_file
   set_env_value "${env_path}" "APP_NAME" "${PROJECT_NAME}"
   set_env_value "${env_path}" "APP_HOST_PORT" "${APP_PORT}"
+  set_env_value "${env_path}" "APP_DATABASE_URL" "${app_database_url}"
   set_env_value "${env_path}" "HOST" "0.0.0.0"
   set_env_value "${env_path}" "PORT" "${runtime_port}"
   set_env_value "${env_path}" "PUBLIC_BASE_URL" "${PUBLIC_BASE_URL}"
+  set_env_value "${env_path}" "OBJECT_DATABASE_URL" "${DATABASE_URL}"
   set_env_value "${env_path}" "DATABASE_URL" "${DATABASE_URL}"
   set_env_value "${env_path}" "POSTGRES_DB" "${POSTGRES_DB}"
   set_env_value "${env_path}" "POSTGRES_USER" "${POSTGRES_USER}"

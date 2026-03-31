@@ -103,7 +103,9 @@ async function handleTableClick(event) {
   }
 }
 
-await initializePage("regions", "Regions", "Create the region catalog once, then pick from it whenever you create or update a bucket.");
+await initializePage("regions", "Regions", "Create the region catalog once, then pick from it whenever you create or update a bucket.", {
+  requiresObjectDatabase: true,
+});
 await refreshRegions();
 fillForm(null);
 document.getElementById("region-form")?.addEventListener("submit", handleSubmit);

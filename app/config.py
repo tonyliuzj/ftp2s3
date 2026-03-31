@@ -27,7 +27,11 @@ load_dotenv_file(BASE_DIR / ".env")
 @dataclass(slots=True)
 class Settings:
     app_name: str = os.getenv("APP_NAME", "ftp2s3")
-    database_url: str = os.getenv("DATABASE_URL", "postgresql+psycopg://postgres:postgres@localhost:5432/ftp2s3")
+    database_url: str = os.getenv("APP_DATABASE_URL", f"sqlite:///{(BASE_DIR / 'data' / 'app.db').as_posix()}")
+    object_database_url: str = os.getenv("OBJECT_DATABASE_URL") or os.getenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://postgres:postgres@localhost:5432/ftp2s3",
+    )
     secret_key: str = os.getenv("SECRET_KEY", "dev-secret-key-change-me")
     session_cookie_name: str = os.getenv("SESSION_COOKIE_NAME", "ftp2s3_session")
     default_admin_username: str = os.getenv("DEFAULT_ADMIN_USERNAME", "admin")

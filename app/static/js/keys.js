@@ -188,7 +188,9 @@ document.getElementById("copy-key-secret")?.addEventListener("click", async () =
   }
 });
 
-await initializePage("keys", "Keys", "Create and rotate multiple S3 access keys. One enabled key can be marked as the default for presigned direct links.");
+await initializePage("keys", "Keys", "Create and rotate multiple S3 access keys. One enabled key can be marked as the default for presigned direct links.", {
+  requiresObjectDatabase: true,
+});
 await refreshKeys();
 fillForm(null);
 renderSecretPanel(null);

@@ -1,37 +1,51 @@
-import { apiFetch, escapeHtml, formatDate, initializePage } from "/panel/js/common.js";
+import { escapeHtml, formatDate, initializePage, loadSystemStatus } from "/panel/js/common.js";
+
+function formatMetric(value) {
+  return value === null || value === undefined ? "n/a" : String(value);
+}
 
 function renderStats(status) {
   document.getElementById("stats").innerHTML = `
     <div class="card">
+      <span class="label">Object DB</span>
+      <div class="value">${status.object_database_available ? "Up" : "Down"}</div>
+      <div class="caption">${escapeHtml(status.object_database_available ? "Object metadata features available" : "Local panel stays online; object features are paused")}</div>
+    </div>
+    <div class="card">
       <span class="label">Zones</span>
-      <div class="value">${status.zone_total}</div>
-      <div class="caption">${status.zone_enabled} enabled</div>
+      <div class="value">${formatMetric(status.zone_total)}</div>
+      <div class="caption">${formatMetric(status.zone_enabled)} enabled</div>
     </div>
     <div class="card">
       <span class="label">Buckets</span>
-      <div class="value">${status.bucket_total}</div>
-      <div class="caption">${status.bucket_enabled} enabled</div>
+      <div class="value">${formatMetric(status.bucket_total)}</div>
+      <div class="caption">${formatMetric(status.bucket_enabled)} enabled</div>
     </div>
     <div class="card">
       <span class="label">Indexed Objects</span>
-      <div class="value">${status.object_total}</div>
+      <div class="value">${formatMetric(status.object_total)}</div>
       <div class="caption">PostgreSQL index of FTP-backed files</div>
     </div>
     <div class="card">
       <span class="label">Admins</span>
-      <div class="value">${status.admin_user_total}</div>
+      <div class="value">${formatMetric(status.admin_user_total)}</div>
       <div class="caption">Session-based admin access</div>
     </div>
     <div class="card">
       <span class="label">Access Keys</span>
-      <div class="value">${status.s3_access_key_count}</div>
-      <div class="caption">${escapeHtml(status.s3_default_access_key_id || "No default key")}</div>
+      <div class="value">${formatMetric(status.s3_access_key_count)}</div>
+      <div class="caption">${escapeHtml(status.s3_default_access_key_id || "Unavailable")}</div>
     </div>
   `;
 }
 
-function renderSyncList(statuses) {
+function renderSyncList(statuses, objectDatabaseAvailable) {
   const container = document.getElementById("sync-list");
+  if (!objectDatabaseAvailable) {
+    container.innerHTML = `<div class="empty-state">The object metadata database is unavailable, so sync history is currently hidden.</div>`;
+    return;
+  }
+
   if (!statuses.length) {
     container.innerHTML = `<div class="empty-state">No sync jobs have been run yet.</div>`;
     return;
@@ -67,19 +81,30 @@ function renderSyncList(statuses) {
   `;
 }
 
-await initializePage("dashboard", "Dashboard", "Overview of zones, buckets, indexed files, and the most recent sync activity.");
-const status = await apiFetch("/admin/system/status");
+function renderRuntimeInfo(status) {
+  const objectDatabaseSummary = status.object_database_available
+    ? "Object metadata database is connected."
+    : escapeHtml(status.object_database_error || "Object metadata database is unavailable.");
+
+  document.getElementById("runtime-info").innerHTML = `
+    <div class="hero-card">
+      <h3 class="section-title">Runtime State</h3>
+      <p>The panel keeps local auth and site settings in SQLite. Object storage metadata, buckets, zones, keys, and sync state depend on PostgreSQL.</p>
+      <p class="list-muted">Site database: ${escapeHtml(status.site_database_url)}</p>
+      <p class="list-muted">Object database: ${escapeHtml(status.object_database_url)}</p>
+      <p class="list-muted">Object database status: ${objectDatabaseSummary}</p>
+      <p class="list-muted">Endpoint URL: ${escapeHtml(status.s3_endpoint_url)}</p>
+      <p class="list-muted">Default region: ${escapeHtml(status.s3_default_region || "Unavailable")}</p>
+      <p class="list-muted">Default access key: ${escapeHtml(status.s3_default_access_key_id || "Unavailable")}</p>
+      <p class="list-muted">Presign expiry: ${escapeHtml(status.s3_presign_expiry_seconds === null || status.s3_presign_expiry_seconds === undefined ? "Unavailable" : `${status.s3_presign_expiry_seconds} seconds`)}</p>
+      <p class="list-muted">Signature auth required: ${status.s3_require_sigv4 === null || status.s3_require_sigv4 === undefined ? "Unavailable" : status.s3_require_sigv4 ? "yes" : "no"}</p>
+      <p class="list-muted">Last loaded: ${escapeHtml(formatDate(new Date().toISOString()))}</p>
+    </div>
+  `;
+}
+
+const page = await initializePage("dashboard", "Dashboard", "Overview of panel health, local auth/settings, and the current object-storage state.");
+const status = page.status || (await loadSystemStatus());
 renderStats(status);
-renderSyncList(status.sync_statuses || []);
-document.getElementById("runtime-info").innerHTML = `
-  <div class="hero-card">
-    <h3 class="section-title">Endpoint Details</h3>
-    <p>The endpoint accepts SigV4 headers and S3-style presigned query links. Bucket URLs stay path-style, and direct links now use X-Amz query parameters.</p>
-    <p class="list-muted">Endpoint URL: ${escapeHtml(status.s3_endpoint_url)}</p>
-    <p class="list-muted">Default region: ${escapeHtml(status.s3_default_region)}</p>
-    <p class="list-muted">Default access key: ${escapeHtml(status.s3_default_access_key_id || "No default key configured")}</p>
-    <p class="list-muted">Presign expiry: ${escapeHtml(String(status.s3_presign_expiry_seconds))} seconds</p>
-    <p class="list-muted">Signature auth required: ${status.s3_require_sigv4 ? "yes" : "no"}</p>
-    <p class="list-muted">Last loaded: ${escapeHtml(formatDate(new Date().toISOString()))}</p>
-  </div>
-`;
+renderSyncList(status.sync_statuses || [], status.object_database_available);
+renderRuntimeInfo(status);

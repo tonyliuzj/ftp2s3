@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from .database import Base
+from .database import CoreBase, ObjectBase
 
 
 def utcnow() -> datetime:
@@ -22,7 +22,7 @@ class TimestampMixin:
     )
 
 
-class Zone(TimestampMixin, Base):
+class Zone(TimestampMixin, ObjectBase):
     __tablename__ = "zones"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -44,7 +44,7 @@ class Zone(TimestampMixin, Base):
     )
 
 
-class ZoneServer(TimestampMixin, Base):
+class ZoneServer(TimestampMixin, ObjectBase):
     __tablename__ = "zone_servers"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -62,7 +62,7 @@ class ZoneServer(TimestampMixin, Base):
     replicas: Mapped[list["ObjectReplica"]] = relationship(back_populates="zone_server")
 
 
-class Region(TimestampMixin, Base):
+class Region(TimestampMixin, ObjectBase):
     __tablename__ = "regions"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -70,7 +70,7 @@ class Region(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
 
 
-class AppSetting(Base):
+class AppSetting(CoreBase):
     __tablename__ = "app_settings"
 
     key: Mapped[str] = mapped_column(String(100), primary_key=True)
@@ -78,7 +78,15 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
 
 
-class S3AccessKey(TimestampMixin, Base):
+class ObjectSetting(ObjectBase):
+    __tablename__ = "object_settings"
+
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(String(2000), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow, nullable=False)
+
+
+class S3AccessKey(TimestampMixin, ObjectBase):
     __tablename__ = "s3_access_keys"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -90,7 +98,7 @@ class S3AccessKey(TimestampMixin, Base):
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
-class Bucket(TimestampMixin, Base):
+class Bucket(TimestampMixin, ObjectBase):
     __tablename__ = "buckets"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
@@ -104,7 +112,7 @@ class Bucket(TimestampMixin, Base):
     objects: Mapped[list["Object"]] = relationship(back_populates="bucket", cascade="all, delete-orphan")
 
 
-class Object(TimestampMixin, Base):
+class Object(TimestampMixin, ObjectBase):
     __tablename__ = "objects"
     __table_args__ = (
         UniqueConstraint("bucket_id", "object_key", name="uq_objects_bucket_key"),
@@ -124,7 +132,7 @@ class Object(TimestampMixin, Base):
     replicas: Mapped[list["ObjectReplica"]] = relationship(back_populates="object", cascade="all, delete-orphan")
 
 
-class ObjectReplica(TimestampMixin, Base):
+class ObjectReplica(TimestampMixin, ObjectBase):
     __tablename__ = "object_replicas"
     __table_args__ = (
         UniqueConstraint("object_id", "zone_server_id", name="uq_object_replicas_object_server"),
@@ -143,7 +151,7 @@ class ObjectReplica(TimestampMixin, Base):
     zone_server: Mapped["ZoneServer"] = relationship(back_populates="replicas")
 
 
-class AdminUser(Base):
+class AdminUser(CoreBase):
     __tablename__ = "admin_users"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)

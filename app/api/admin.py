@@ -9,10 +9,10 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import get_db
+from app.database import SessionLocal, configure_object_database, get_db, get_object_database_status, get_site_db
 from app.dependencies import get_current_admin
 from app.http_helpers import iter_file_chunks
-from app.models import AdminUser, AppSetting, Bucket, Object, ObjectReplica, Region, S3AccessKey, Zone, ZoneServer
+from app.models import AdminUser, Bucket, Object, ObjectReplica, ObjectSetting, Region, S3AccessKey, Zone, ZoneServer
 from app.pathing import InvalidPathError, basename, normalize_ftp_dir, normalize_object_key
 from app.s3_auth import generate_presigned_get_url
 from app.schemas import (
@@ -21,8 +21,6 @@ from app.schemas import (
     AccessKeyRead,
     AccessKeyUpdate,
     AdminUserResponse,
-    AppSettingsRead,
-    AppSettingsUpdate,
     BucketCreate,
     BucketObjectsResponse,
     BucketRead,
@@ -31,6 +29,8 @@ from app.schemas import (
     LoginResponse,
     MessageResponse,
     ObjectRead,
+    ObjectSettingsRead,
+    ObjectSettingsUpdate,
     PresignRequest,
     PresignResponse,
     RegionCreate,
@@ -41,6 +41,8 @@ from app.schemas import (
     SyncRepairResponse,
     SyncStatusResponse,
     SystemStatusResponse,
+    SiteSettingsRead,
+    SiteSettingsUpdate,
     ZoneServerRead,
     ZoneCreate,
     ZoneSyncPreviewResponse,
@@ -58,7 +60,13 @@ from app.services.access_keys import (
     mask_secret_access_key,
     set_default_access_key,
 )
-from app.services.app_settings import load_effective_s3_settings, update_s3_settings
+from app.services.app_settings import (
+    load_effective_s3_settings,
+    load_object_settings,
+    load_site_settings,
+    update_object_settings,
+    update_site_settings,
+)
 from app.services.storage_manager import InsufficientZoneStorageError, StorageManager, StorageOperationError
 from app.services.sync_service import SyncService
 from app.services.zone_sync_service import ZoneSyncService
@@ -67,14 +75,20 @@ from app.services.zone_sync_service import ZoneSyncService
 router = APIRouter(prefix="/admin", tags=["admin"])
 
 
-def _app_settings_to_schema(effective_settings) -> AppSettingsRead:
-    return AppSettingsRead(
-        public_base_url=effective_settings.public_base_url,
-        s3_service_name=effective_settings.s3_service_name,
-        s3_default_region=effective_settings.s3_default_region,
-        s3_require_sigv4=effective_settings.s3_require_sigv4,
-        s3_max_clock_skew_seconds=effective_settings.s3_max_clock_skew_seconds,
-        s3_presign_expiry_seconds=effective_settings.s3_presign_expiry_seconds,
+def _site_settings_to_schema(site_settings) -> SiteSettingsRead:
+    return SiteSettingsRead(
+        public_base_url=site_settings.public_base_url,
+        object_database_url=site_settings.object_database_url,
+    )
+
+
+def _object_settings_to_schema(object_settings) -> ObjectSettingsRead:
+    return ObjectSettingsRead(
+        s3_service_name=object_settings.s3_service_name,
+        s3_default_region=object_settings.s3_default_region,
+        s3_require_sigv4=object_settings.s3_require_sigv4,
+        s3_max_clock_skew_seconds=object_settings.s3_max_clock_skew_seconds,
+        s3_presign_expiry_seconds=object_settings.s3_presign_expiry_seconds,
     )
 
 
@@ -254,7 +268,7 @@ def _sync_zone_servers(db: Session, zone: Zone, payload_servers: list) -> None:
 
 def _region_to_schema(db: Session, region: Region) -> RegionRead:
     bucket_count = int(db.execute(select(func.count(Bucket.id)).where(Bucket.region == region.code)).scalar_one() or 0)
-    default_region = load_effective_s3_settings(db).s3_default_region
+    default_region = load_object_settings(db).s3_default_region
     return RegionRead(
         id=region.id,
         code=region.code,
@@ -267,7 +281,7 @@ def _region_to_schema(db: Session, region: Region) -> RegionRead:
 
 
 @router.post("/login", response_model=LoginResponse)
-def admin_login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)) -> LoginResponse:
+def admin_login(payload: LoginRequest, request: Request, db: Session = Depends(get_site_db)) -> LoginResponse:
     user = db.execute(select(AdminUser).where(AdminUser.username == payload.username)).scalar_one_or_none()
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password.")
@@ -288,28 +302,55 @@ def admin_me(admin_user: AdminUser = Depends(get_current_admin)) -> AdminUserRes
     return AdminUserResponse.model_validate(admin_user)
 
 
-@router.get("/settings", response_model=AppSettingsRead)
-def get_settings(
+@router.get("/settings/site", response_model=SiteSettingsRead)
+def get_site_settings(
     request: Request,
+    site_db: Session = Depends(get_site_db),
+    _admin_user: AdminUser = Depends(get_current_admin),
+) -> SiteSettingsRead:
+    site_settings = load_site_settings(site_db, request_base_url=str(request.base_url).rstrip("/"))
+    return _site_settings_to_schema(site_settings)
+
+
+@router.put("/settings/site", response_model=SiteSettingsRead)
+def save_site_settings(
+    payload: SiteSettingsUpdate,
+    site_db: Session = Depends(get_site_db),
+    _admin_user: AdminUser = Depends(get_current_admin),
+) -> SiteSettingsRead:
+    try:
+        site_settings = update_site_settings(site_db, payload.model_dump(), commit=False)
+        site_db.commit()
+        return _site_settings_to_schema(site_settings)
+    except Exception as exc:
+        site_db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/settings/object", response_model=ObjectSettingsRead)
+def get_object_settings(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
-) -> AppSettingsRead:
-    effective_settings = load_effective_s3_settings(db, request_base_url=str(request.base_url).rstrip("/"))
-    return _app_settings_to_schema(effective_settings)
+) -> ObjectSettingsRead:
+    return _object_settings_to_schema(load_object_settings(db))
 
 
-@router.put("/settings", response_model=AppSettingsRead)
-def save_settings(
-    payload: AppSettingsUpdate,
+@router.put("/settings/object", response_model=ObjectSettingsRead)
+def save_object_settings(
+    payload: ObjectSettingsUpdate,
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
-) -> AppSettingsRead:
-    region = db.execute(select(Region).where(Region.code == payload.s3_default_region)).scalar_one_or_none()
-    if region is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Default region not found.")
-
-    effective_settings = update_s3_settings(db, payload.model_dump())
-    return _app_settings_to_schema(effective_settings)
+) -> ObjectSettingsRead:
+    try:
+        object_settings = update_object_settings(db, payload.model_dump(), commit=False)
+        region = db.execute(select(Region).where(Region.code == payload.s3_default_region)).scalar_one_or_none()
+        if region is None:
+            db.add(Region(code=payload.s3_default_region, name=payload.s3_default_region))
+        db.commit()
+        return _object_settings_to_schema(object_settings)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/regions", response_model=list[RegionRead])
@@ -363,18 +404,22 @@ def update_region(
         region.name = data["name"]
 
     if new_code != old_code:
-        effective_default_region = load_effective_s3_settings(db).s3_default_region
+        effective_default_region = load_object_settings(db).s3_default_region
         for bucket in db.execute(select(Bucket).where(Bucket.region == old_code)).scalars():
             bucket.region = new_code
 
         if effective_default_region == old_code:
-            default_region_setting = db.get(AppSetting, "s3_default_region")
+            default_region_setting = db.get(ObjectSetting, "s3_default_region")
             if default_region_setting is None:
-                db.add(AppSetting(key="s3_default_region", value=new_code))
+                db.add(ObjectSetting(key="s3_default_region", value=new_code))
             else:
                 default_region_setting.value = new_code
 
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(region)
     return _region_to_schema(db, region)
 
@@ -396,7 +441,7 @@ def delete_region(
             detail="Region cannot be deleted while buckets still use it.",
         )
 
-    default_region = load_effective_s3_settings(db).s3_default_region
+    default_region = load_object_settings(db).s3_default_region
     if region.code == default_region:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -879,6 +924,7 @@ def presign_object_via_admin(
     payload: PresignRequest,
     request: Request,
     db: Session = Depends(get_db),
+    site_db: Session = Depends(get_site_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> PresignResponse:
     manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
@@ -890,7 +936,7 @@ def presign_object_via_admin(
     except InvalidPathError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    effective_settings = load_effective_s3_settings(db, request_base_url=str(request.base_url).rstrip("/"))
+    effective_settings = load_effective_s3_settings(site_db, db, request_base_url=str(request.base_url).rstrip("/"))
     access_key = (
         get_access_key_by_access_key_id(db, payload.access_key_id)
         if payload.access_key_id
@@ -1017,42 +1063,83 @@ def rescan_all_buckets(
 @router.get("/system/status", response_model=SystemStatusResponse)
 def system_status(
     request: Request,
-    db: Session = Depends(get_db),
+    site_db: Session = Depends(get_site_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> SystemStatusResponse:
-    effective_settings = load_effective_s3_settings(db, request_base_url=str(request.base_url).rstrip("/"))
-    zone_total = int(db.execute(select(func.count(Zone.id))).scalar_one() or 0)
-    zone_enabled = int(db.execute(select(func.count(Zone.id)).where(Zone.enabled.is_(True))).scalar_one() or 0)
-    bucket_total = int(db.execute(select(func.count(Bucket.id))).scalar_one() or 0)
-    bucket_enabled = int(db.execute(select(func.count(Bucket.id)).where(Bucket.enabled.is_(True))).scalar_one() or 0)
-    object_total = int(db.execute(select(func.count(Object.id))).scalar_one() or 0)
-    zone_server_total = int(db.execute(select(func.count(ZoneServer.id))).scalar_one() or 0)
-    mirror_all_zone_total = int(
-        db.execute(select(func.count(Zone.id)).where(Zone.pool_strategy == "mirror_all")).scalar_one() or 0
-    )
-    admin_user_total = int(db.execute(select(func.count(AdminUser.id))).scalar_one() or 0)
-    access_key_count = int(db.execute(select(func.count(S3AccessKey.id))).scalar_one() or 0)
-    default_access_key = get_default_access_key(db)
-    sync_service = SyncService(db=db, ftp_timeout=settings.ftp_timeout)
+    request_base_url = str(request.base_url).rstrip("/")
+    site_settings = load_site_settings(site_db, request_base_url=request_base_url)
+    object_database_status = get_object_database_status(core_db=site_db)
+    admin_user_total = int(site_db.execute(select(func.count(AdminUser.id))).scalar_one() or 0)
+
+    object_counts: dict[str, object] = {
+        "s3_service_name": None,
+        "s3_default_region": None,
+        "s3_default_access_key_id": None,
+        "s3_access_key_count": None,
+        "s3_require_sigv4": None,
+        "s3_presign_expiry_seconds": None,
+        "zone_total": None,
+        "zone_enabled": None,
+        "bucket_total": None,
+        "bucket_enabled": None,
+        "object_total": None,
+        "zone_server_total": None,
+        "mirror_all_zone_total": None,
+        "sync_statuses": [],
+    }
+
+    if object_database_status.available:
+        try:
+            configure_object_database(database_url=object_database_status.database_url)
+            with SessionLocal() as db:
+                effective_settings = load_effective_s3_settings(site_db, db, request_base_url=request_base_url)
+                default_access_key = get_default_access_key(db)
+                sync_service = SyncService(db=db, ftp_timeout=settings.ftp_timeout)
+                object_counts = {
+                    "s3_service_name": effective_settings.s3_service_name,
+                    "s3_default_region": effective_settings.s3_default_region,
+                    "s3_default_access_key_id": default_access_key.access_key_id if default_access_key else None,
+                    "s3_access_key_count": int(db.execute(select(func.count(S3AccessKey.id))).scalar_one() or 0),
+                    "s3_require_sigv4": effective_settings.s3_require_sigv4,
+                    "s3_presign_expiry_seconds": effective_settings.s3_presign_expiry_seconds,
+                    "zone_total": int(db.execute(select(func.count(Zone.id))).scalar_one() or 0),
+                    "zone_enabled": int(db.execute(select(func.count(Zone.id)).where(Zone.enabled.is_(True))).scalar_one() or 0),
+                    "bucket_total": int(db.execute(select(func.count(Bucket.id))).scalar_one() or 0),
+                    "bucket_enabled": int(db.execute(select(func.count(Bucket.id)).where(Bucket.enabled.is_(True))).scalar_one() or 0),
+                    "object_total": int(db.execute(select(func.count(Object.id))).scalar_one() or 0),
+                    "zone_server_total": int(db.execute(select(func.count(ZoneServer.id))).scalar_one() or 0),
+                    "mirror_all_zone_total": int(
+                        db.execute(select(func.count(Zone.id)).where(Zone.pool_strategy == "mirror_all")).scalar_one() or 0
+                    ),
+                    "sync_statuses": [SyncStatusResponse.model_validate(item) for item in sync_service.list_statuses()],
+                }
+        except Exception as exc:
+            object_database_status = get_object_database_status(core_db=site_db)
+            if object_database_status.available:
+                object_database_status.available = False
+                object_database_status.error = f"Object metadata database is unavailable: {exc}"
 
     return SystemStatusResponse(
         app_name=settings.app_name,
-        database_url=settings.database_url,
-        s3_endpoint_url=effective_settings.public_base_url,
-        s3_service_name=effective_settings.s3_service_name,
-        s3_default_region=effective_settings.s3_default_region,
-        s3_default_access_key_id=default_access_key.access_key_id if default_access_key else None,
-        s3_access_key_count=access_key_count,
-        s3_require_sigv4=effective_settings.s3_require_sigv4,
+        site_database_url=settings.database_url,
+        object_database_url=site_settings.object_database_url,
+        object_database_available=object_database_status.available,
+        object_database_error=object_database_status.error,
+        s3_endpoint_url=site_settings.public_base_url,
+        s3_service_name=object_counts["s3_service_name"],
+        s3_default_region=object_counts["s3_default_region"],
+        s3_default_access_key_id=object_counts["s3_default_access_key_id"],
+        s3_access_key_count=object_counts["s3_access_key_count"],
+        s3_require_sigv4=object_counts["s3_require_sigv4"],
         s3_path_style_only=True,
-        s3_presign_expiry_seconds=effective_settings.s3_presign_expiry_seconds,
-        zone_total=zone_total,
-        zone_enabled=zone_enabled,
-        bucket_total=bucket_total,
-        bucket_enabled=bucket_enabled,
-        object_total=object_total,
-        zone_server_total=zone_server_total,
-        mirror_all_zone_total=mirror_all_zone_total,
+        s3_presign_expiry_seconds=object_counts["s3_presign_expiry_seconds"],
+        zone_total=object_counts["zone_total"],
+        zone_enabled=object_counts["zone_enabled"],
+        bucket_total=object_counts["bucket_total"],
+        bucket_enabled=object_counts["bucket_enabled"],
+        object_total=object_counts["object_total"],
+        zone_server_total=object_counts["zone_server_total"],
+        mirror_all_zone_total=object_counts["mirror_all_zone_total"],
         admin_user_total=admin_user_total,
-        sync_statuses=[SyncStatusResponse.model_validate(item) for item in sync_service.list_statuses()],
+        sync_statuses=object_counts["sync_statuses"],
     )

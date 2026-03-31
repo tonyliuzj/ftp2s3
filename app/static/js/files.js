@@ -365,7 +365,9 @@ async function clearSearch() {
   await renderListing();
 }
 
-await initializePage("files", "File Browser", "Browse folders, upload files, search indexed object paths, and open S3-style direct links from one place.");
+await initializePage("files", "File Browser", "Browse folders, upload files, search indexed object paths, and open S3-style direct links from one place.", {
+  requiresObjectDatabase: true,
+});
 availableBuckets = await loadBuckets();
 fillBucketOptions(availableBuckets);
 currentBucket = getQueryParam("bucket") || availableBuckets[0]?.name || "";

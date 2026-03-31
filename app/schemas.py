@@ -385,28 +385,56 @@ class ZoneSyncRepairResponse(BaseModel):
 
 class SystemStatusResponse(BaseModel):
     app_name: str
-    database_url: str
+    site_database_url: str
+    object_database_url: str
+    object_database_available: bool
+    object_database_error: str | None = None
     s3_endpoint_url: str
-    s3_service_name: str
-    s3_default_region: str
+    s3_service_name: str | None = None
+    s3_default_region: str | None = None
     s3_default_access_key_id: str | None = None
-    s3_access_key_count: int
-    s3_require_sigv4: bool
+    s3_access_key_count: int | None = None
+    s3_require_sigv4: bool | None = None
     s3_path_style_only: bool
-    s3_presign_expiry_seconds: int
-    zone_total: int
-    zone_enabled: int
-    bucket_total: int
-    bucket_enabled: int
-    object_total: int
-    zone_server_total: int
-    mirror_all_zone_total: int
+    s3_presign_expiry_seconds: int | None = None
+    zone_total: int | None = None
+    zone_enabled: int | None = None
+    bucket_total: int | None = None
+    bucket_enabled: int | None = None
+    object_total: int | None = None
+    zone_server_total: int | None = None
+    mirror_all_zone_total: int | None = None
     admin_user_total: int
-    sync_statuses: list[SyncStatusResponse]
+    sync_statuses: list[SyncStatusResponse] = Field(default_factory=list)
 
 
-class AppSettingsRead(BaseModel):
+class SiteSettingsRead(BaseModel):
     public_base_url: str
+    object_database_url: str
+
+
+class SiteSettingsUpdate(BaseModel):
+    public_base_url: str = Field(min_length=1, max_length=500)
+    object_database_url: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("public_base_url")
+    @classmethod
+    def validate_public_base_url(cls, value: str) -> str:
+        normalized = value.strip().rstrip("/")
+        if not normalized.startswith(("http://", "https://")):
+            raise ValueError("Public base URL must start with http:// or https://.")
+        return normalized
+
+    @field_validator("object_database_url")
+    @classmethod
+    def validate_object_database_url(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")):
+            raise ValueError("Object database URL must be a PostgreSQL SQLAlchemy URL.")
+        return normalized
+
+
+class ObjectSettingsRead(BaseModel):
     s3_service_name: str
     s3_default_region: str
     s3_require_sigv4: bool
@@ -419,21 +447,12 @@ class AppSettingsRead(BaseModel):
         return _validate_region(value)
 
 
-class AppSettingsUpdate(BaseModel):
-    public_base_url: str = Field(min_length=1, max_length=500)
+class ObjectSettingsUpdate(BaseModel):
     s3_service_name: str = Field(min_length=1, max_length=50)
     s3_default_region: str = Field(min_length=3, max_length=32)
     s3_require_sigv4: bool
     s3_max_clock_skew_seconds: int = Field(ge=0, le=3600)
     s3_presign_expiry_seconds: int = Field(ge=60, le=604800)
-
-    @field_validator("public_base_url")
-    @classmethod
-    def validate_public_base_url(cls, value: str) -> str:
-        normalized = value.strip().rstrip("/")
-        if not normalized.startswith(("http://", "https://")):
-            raise ValueError("Public base URL must start with http:// or https://.")
-        return normalized
 
     @field_validator("s3_default_region")
     @classmethod

@@ -7,12 +7,15 @@ services:
     env_file:
       - .env
     environment:
+      APP_DATABASE_URL: sqlite:////app/data/app.db
       HOST: 0.0.0.0
       PORT: 8000
     ports:
       - "${APP_HOST_PORT:-8000}:8000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      - app_data:/app/data
 
   postgres:
     image: postgres:16-alpine
@@ -30,5 +33,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
 
 volumes:
+  app_data:
+    name: ftp2s3-app-data
   postgres_data:
     name: ftp2s3-postgres-data

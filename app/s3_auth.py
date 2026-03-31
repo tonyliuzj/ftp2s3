@@ -10,7 +10,7 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import get_db, get_site_db
 from app.models import Bucket
 from app.services.access_keys import get_access_key_by_access_key_id, touch_access_key
 from app.services.app_settings import EffectiveS3Settings, load_effective_s3_settings
@@ -24,9 +24,10 @@ UNSIGNED_PAYLOAD = "UNSIGNED-PAYLOAD"
 async def require_s3_signature(
     request: Request,
     db: Session = Depends(get_db),
+    site_db: Session = Depends(get_site_db),
     bucket_name: str | None = None,
 ) -> dict[str, str] | None:
-    effective_settings = load_effective_s3_settings(db, request_base_url=str(request.base_url).rstrip("/"))
+    effective_settings = load_effective_s3_settings(site_db, db, request_base_url=str(request.base_url).rstrip("/"))
     if not effective_settings.s3_require_sigv4:
         return None
 
