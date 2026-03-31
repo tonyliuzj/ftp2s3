@@ -33,6 +33,7 @@ PUBLIC_BASE_URL=""
 DATABASE_URL=""
 POSTGRES_MODE="existing"
 POSTGRES_SERVICE_NAME=""
+POSTGRES_HOST="localhost"
 POSTGRES_DB="${PROJECT_SLUG}"
 POSTGRES_USER="${PROJECT_SLUG}"
 POSTGRES_PASSWORD=""
@@ -375,32 +376,43 @@ validate_port() {
 prompt_app_settings() {
   APP_PORT="$(prompt_with_default "Enter the host port for ${PROJECT_NAME}" "${DEFAULT_PORT}")"
   validate_port "${APP_PORT}"
-
-  PUBLIC_BASE_URL="$(prompt_with_default "Enter PUBLIC_BASE_URL" "http://localhost:${APP_PORT}")"
 }
 
-prompt_admin_settings() {
+load_existing_install_defaults() {
   local env_path="${INSTALL_DIR}/${ENV_FILE_NAME}"
-  local current_admin_username current_admin_password current_secret_key
+  local current_postgres_host current_postgres_db current_postgres_user current_postgres_password current_secret_key
+  local existing_database_url
 
-  current_admin_username="$(get_env_value "${env_path}" "DEFAULT_ADMIN_USERNAME")"
-  current_admin_password="$(get_env_value "${env_path}" "DEFAULT_ADMIN_PASSWORD")"
+  current_postgres_host="$(get_env_value "${env_path}" "POSTGRES_HOST")"
+  current_postgres_db="$(get_env_value "${env_path}" "POSTGRES_DB")"
+  current_postgres_user="$(get_env_value "${env_path}" "POSTGRES_USER")"
+  current_postgres_password="$(get_env_value "${env_path}" "POSTGRES_PASSWORD")"
   current_secret_key="$(get_env_value "${env_path}" "SECRET_KEY")"
-
-  if [ -z "${current_admin_username}" ]; then
-    current_admin_username="admin"
+  existing_database_url="$(get_env_value "${env_path}" "OBJECT_DATABASE_URL")"
+  if [ -z "${existing_database_url}" ]; then
+    existing_database_url="$(get_env_value "${env_path}" "DATABASE_URL")"
   fi
 
-  if [ -z "${current_admin_password}" ] || [ "${current_admin_password}" = "admin123" ]; then
-    current_admin_password="$(generate_random_string)"
+  if [ -n "${current_postgres_host}" ]; then
+    POSTGRES_HOST="${current_postgres_host}"
+  fi
+  if [ -n "${current_postgres_db}" ]; then
+    POSTGRES_DB="${current_postgres_db}"
+  fi
+  if [ -n "${current_postgres_user}" ]; then
+    POSTGRES_USER="${current_postgres_user}"
+  fi
+  if [ -n "${current_postgres_password}" ]; then
+    POSTGRES_PASSWORD="${current_postgres_password}"
+  fi
+  if [ -n "${existing_database_url}" ]; then
+    DATABASE_URL="${existing_database_url}"
   fi
 
   if [ -z "${current_secret_key}" ] || [ "${current_secret_key}" = "change-this-in-production" ] || [ "${current_secret_key}" = "dev-secret-key-change-me" ]; then
     current_secret_key="$(generate_random_string)"
   fi
 
-  ADMIN_USERNAME="$(prompt_with_default "Enter the default admin username" "${current_admin_username}")"
-  ADMIN_PASSWORD="$(prompt_with_default "Enter the default admin password" "${current_admin_password}")"
   SECRET_KEY_VALUE="${current_secret_key}"
 }
 
@@ -458,17 +470,60 @@ validate_pg_identifier() {
   fi
 }
 
+extract_host_from_database_url() {
+  local database_url="$1"
+  local authority
+  local host
+
+  if [[ "${database_url}" != *"://"* ]]; then
+    return
+  fi
+
+  authority="${database_url#*://}"
+  authority="${authority%%/*}"
+  authority="${authority##*@}"
+
+  if [ -z "${authority}" ]; then
+    return
+  fi
+
+  if [[ "${authority}" == \[* ]]; then
+    host="${authority#\[}"
+    host="${host%%]*}"
+    if [ -n "${host}" ]; then
+      printf '[%s]\n' "${host}"
+    fi
+    return
+  fi
+
+  host="${authority%%:*}"
+  if [ -n "${host}" ]; then
+    printf '%s\n' "${host}"
+  fi
+}
+
+prepare_local_postgresql_defaults() {
+  if [ -z "${POSTGRES_DB}" ]; then
+    POSTGRES_DB="${PROJECT_SLUG}"
+  fi
+
+  if [ -z "${POSTGRES_USER}" ] || [ "${POSTGRES_USER}" = "postgres" ]; then
+    POSTGRES_USER="${PROJECT_SLUG}"
+  fi
+
+  if [ -z "${POSTGRES_PASSWORD}" ] || [ "${POSTGRES_PASSWORD}" = "postgres" ]; then
+    POSTGRES_PASSWORD="$(generate_random_string)"
+  fi
+}
+
 configure_local_postgresql() {
   local install_mode="$1"
   local db_host sql_password
 
+  prepare_local_postgresql_defaults
   install_postgresql_packages
   ensure_postgresql_initialized
   ensure_postgresql_running
-
-  POSTGRES_DB="$(prompt_with_default "Enter the PostgreSQL database name" "${POSTGRES_DB}")"
-  POSTGRES_USER="$(prompt_with_default "Enter the PostgreSQL username" "${POSTGRES_USER}")"
-  POSTGRES_PASSWORD="$(prompt_with_default "Enter the PostgreSQL password" "$(generate_random_string)")"
 
   validate_pg_identifier "${POSTGRES_DB}"
   validate_pg_identifier "${POSTGRES_USER}"
@@ -487,14 +542,13 @@ configure_local_postgresql() {
     db_host="localhost"
   fi
 
+  POSTGRES_HOST="${db_host}"
   DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${db_host}:5432/${POSTGRES_DB}"
   POSTGRES_MODE="host"
 }
 
 configure_compose_postgresql() {
-  POSTGRES_DB="$(prompt_with_default "Enter the PostgreSQL database name" "${POSTGRES_DB}")"
-  POSTGRES_USER="$(prompt_with_default "Enter the PostgreSQL username" "${POSTGRES_USER}")"
-  POSTGRES_PASSWORD="$(prompt_with_default "Enter the PostgreSQL password" "$(generate_random_string)")"
+  prepare_local_postgresql_defaults
 
   validate_pg_identifier "${POSTGRES_DB}"
   validate_pg_identifier "${POSTGRES_USER}"
@@ -502,6 +556,7 @@ configure_compose_postgresql() {
     fail "Use letters, numbers, or underscores for the PostgreSQL password."
   fi
 
+  POSTGRES_HOST="${DOCKER_POSTGRES_SERVICE}"
   DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DOCKER_POSTGRES_SERVICE}:5432/${POSTGRES_DB}"
   POSTGRES_SERVICE_NAME=""
   POSTGRES_MODE="compose"
@@ -520,24 +575,38 @@ normalize_docker_database_url() {
 
 configure_existing_postgresql() {
   local install_mode="$1"
-  local env_path="${INSTALL_DIR}/${ENV_FILE_NAME}"
-  local existing_database_url default_database_url
+  local existing_postgres_host
 
-  existing_database_url="$(get_env_value "${env_path}" "OBJECT_DATABASE_URL")"
-  if [ -z "${existing_database_url}" ]; then
-    existing_database_url="$(get_env_value "${env_path}" "DATABASE_URL")"
-  fi
-  if [ -z "${existing_database_url}" ]; then
-    existing_database_url="postgresql+psycopg://postgres:postgres@localhost:5432/${PROJECT_SLUG}"
-  fi
-
-  default_database_url="${existing_database_url}"
-  DATABASE_URL="$(prompt_with_default "Enter the OBJECT_DATABASE_URL to use" "${default_database_url}")"
   POSTGRES_MODE="existing"
   POSTGRES_SERVICE_NAME=""
 
+  if [ -z "${POSTGRES_DB}" ]; then
+    POSTGRES_DB="${PROJECT_SLUG}"
+  fi
+  if [ -z "${POSTGRES_USER}" ]; then
+    POSTGRES_USER="postgres"
+  fi
+  if [ -z "${POSTGRES_PASSWORD}" ]; then
+    POSTGRES_PASSWORD="postgres"
+  fi
+  if [ -z "${POSTGRES_HOST}" ]; then
+    POSTGRES_HOST="localhost"
+  fi
+
+  if [ -z "${DATABASE_URL}" ]; then
+    if [ "${install_mode}" = "docker" ] && { [ "${POSTGRES_HOST}" = "localhost" ] || [ "${POSTGRES_HOST}" = "127.0.0.1" ]; }; then
+      POSTGRES_HOST="host.docker.internal"
+    fi
+    DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:5432/${POSTGRES_DB}"
+  fi
+
   if [ "${install_mode}" = "docker" ]; then
     normalize_docker_database_url
+  fi
+
+  existing_postgres_host="$(extract_host_from_database_url "${DATABASE_URL}")"
+  if [ -n "${existing_postgres_host}" ]; then
+    POSTGRES_HOST="${existing_postgres_host}"
   fi
 }
 
@@ -547,7 +616,7 @@ prompt_postgresql_mode() {
   echo
   echo "PostgreSQL setup:"
   if [ "${install_mode}" = "docker" ]; then
-    if confirm_default_no "Set up local PostgreSQL with Docker Compose?"; then
+    if confirm_default_no "Set up local PostgreSQL with Docker Compose? Choose No to finish PostgreSQL configuration from the setup screen."; then
       configure_compose_postgresql
     else
       configure_existing_postgresql "${install_mode}"
@@ -555,7 +624,7 @@ prompt_postgresql_mode() {
     return
   fi
 
-  if confirm_default_no "Set up local PostgreSQL on this host?"; then
+  if confirm_default_no "Set up local PostgreSQL on this host? Choose No to finish PostgreSQL configuration from the setup screen."; then
     configure_local_postgresql "${install_mode}"
   else
     configure_existing_postgresql "${install_mode}"
@@ -571,7 +640,7 @@ postgres_setup_summary() {
       echo "Local PostgreSQL on this host"
       ;;
     existing)
-      echo "Existing PostgreSQL instance"
+      echo "Configure from the setup screen"
       ;;
     *)
       echo "${POSTGRES_MODE}"
@@ -581,14 +650,15 @@ postgres_setup_summary() {
 
 print_install_summary() {
   local install_mode="$1"
+  local setup_url="http://<server-host>:${APP_PORT}/panel/pages/setup.html"
 
   echo
   echo "========== Install Summary =========="
   echo "Mode: ${install_mode}"
   echo "Install directory: ${INSTALL_DIR}"
-  echo "URL: ${PUBLIC_BASE_URL}"
+  echo "Port: ${APP_PORT}"
+  echo "Setup page: ${setup_url}"
   echo "PostgreSQL: $(postgres_setup_summary)"
-  echo "Admin username: ${ADMIN_USERNAME}"
 
   if [ "${install_mode}" = "direct" ]; then
     echo "Service: ${SYSTEMD_SERVICE_NAME}"
@@ -620,14 +690,12 @@ write_env_file() {
   set_env_value "${env_path}" "APP_DATABASE_URL" "${app_database_url}"
   set_env_value "${env_path}" "HOST" "0.0.0.0"
   set_env_value "${env_path}" "PORT" "${runtime_port}"
-  set_env_value "${env_path}" "PUBLIC_BASE_URL" "${PUBLIC_BASE_URL}"
   set_env_value "${env_path}" "OBJECT_DATABASE_URL" "${DATABASE_URL}"
   set_env_value "${env_path}" "DATABASE_URL" "${DATABASE_URL}"
+  set_env_value "${env_path}" "POSTGRES_HOST" "${POSTGRES_HOST}"
   set_env_value "${env_path}" "POSTGRES_DB" "${POSTGRES_DB}"
   set_env_value "${env_path}" "POSTGRES_USER" "${POSTGRES_USER}"
   set_env_value "${env_path}" "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD}"
-  set_env_value "${env_path}" "DEFAULT_ADMIN_USERNAME" "${ADMIN_USERNAME}"
-  set_env_value "${env_path}" "DEFAULT_ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
   set_env_value "${env_path}" "SECRET_KEY" "${SECRET_KEY_VALUE}"
 }
 
@@ -736,7 +804,7 @@ run_docker_stack() {
     wait_for_compose_postgresql
   fi
 
-  docker_compose up -d --build "${DOCKER_APP_SERVICE}"
+  docker_compose up -d --no-deps --build "${DOCKER_APP_SERVICE}"
 }
 
 stop_and_remove_docker() {
@@ -799,8 +867,8 @@ install_direct_ftp2s3() {
   ensure_app_user
   sync_repo
   ensure_env_file
+  load_existing_install_defaults
   prompt_app_settings
-  prompt_admin_settings
   prompt_postgresql_mode "direct"
   write_env_file "direct"
   setup_python_environment
@@ -818,8 +886,8 @@ install_docker_ftp2s3() {
   ensure_docker_installed
   sync_repo
   ensure_env_file
+  load_existing_install_defaults
   prompt_app_settings
-  prompt_admin_settings
   prompt_postgresql_mode "docker"
   write_env_file "docker"
   run_docker_stack
