@@ -2,4 +2,11 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .venv/
+.git/
+.env
+venv/
+*.pyc
+*.pyo
+ftp2s3.sh
+.installer-state
 data/

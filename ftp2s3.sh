@@ -1,0 +1,914 @@
+#!/bin/bash
+set -e
+
+PROJECT_NAME="ftp2s3"
+PROJECT_SLUG="ftp2s3"
+GIT_REPO_URL="https://github.com/tonyliuzj/ftp2s3.git"
+INSTALL_DIR="/opt/ftp2s3"
+RUNTIME="python"
+SERVICE_TYPE="systemd"
+START_COMMAND="venv/bin/python -m uvicorn app.main:app"
+BUILD_COMMAND="none"
+DEPENDENCY_INSTALL_COMMAND="venv/bin/pip install -r requirements.txt"
+ENV_FILE_NAME=".env"
+DEFAULT_PORT="8000"
+
+APP_USER="ftp2s3"
+APP_GROUP="ftp2s3"
+SYSTEMD_SERVICE_NAME="ftp2s3"
+SYSTEMD_SERVICE_FILE="/etc/systemd/system/${SYSTEMD_SERVICE_NAME}.service"
+INSTALL_STATE_FILE="${INSTALL_DIR}/.installer-state"
+VENV_DIR="${INSTALL_DIR}/venv"
+DOCKER_APP_IMAGE="${PROJECT_SLUG}-app:latest"
+DOCKER_LEGACY_IMAGE="${PROJECT_SLUG}:latest"
+DOCKER_LEGACY_CONTAINER="${PROJECT_SLUG}"
+DOCKER_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
+DOCKER_COMPOSE_PROJECT="${PROJECT_SLUG}"
+DOCKER_APP_SERVICE="app"
+DOCKER_POSTGRES_SERVICE="postgres"
+DOCKER_INTERNAL_PORT="8000"
+
+APP_PORT="${DEFAULT_PORT}"
+PUBLIC_BASE_URL=""
+DATABASE_URL=""
+POSTGRES_MODE="existing"
+POSTGRES_SERVICE_NAME=""
+POSTGRES_DB="${PROJECT_SLUG}"
+POSTGRES_USER="${PROJECT_SLUG}"
+POSTGRES_PASSWORD=""
+CREATED_APP_USER="false"
+CREATED_APP_GROUP="false"
+DOCKER_POSTGRES_VOLUME="${PROJECT_SLUG}-postgres-data"
+
+log() {
+  echo "[${PROJECT_SLUG}] $1"
+}
+
+fail() {
+  echo "[${PROJECT_SLUG}] $1" >&2
+  exit 1
+}
+
+require_root() {
+  if [ "$(id -u)" -ne 0 ]; then
+    fail "Run this installer as root or with sudo."
+  fi
+}
+
+ensure_linux() {
+  if [ "$(uname -s)" != "Linux" ]; then
+    fail "This installer currently supports Linux hosts with systemd."
+  fi
+
+  if ! command -v systemctl >/dev/null 2>&1; then
+    fail "systemd is required but systemctl is not available."
+  fi
+}
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+prompt_with_default() {
+  local prompt="$1"
+  local default_value="$2"
+  local response
+
+  read -r -p "${prompt} [${default_value}]: " response
+  if [ -z "$response" ]; then
+    response="$default_value"
+  fi
+
+  printf '%s\n' "$response"
+}
+
+confirm_default_no() {
+  local prompt="$1"
+  local response
+
+  read -r -p "${prompt} [y/N]: " response
+  case "$response" in
+    y|Y|yes|YES) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+confirm_default_yes() {
+  local prompt="$1"
+  local response
+
+  read -r -p "${prompt} [Y/n]: " response
+  case "$response" in
+    n|N|no|NO) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+generate_random_string() {
+  if command_exists openssl; then
+    openssl rand -hex 24
+    return
+  fi
+
+  tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32
+}
+
+detect_package_manager() {
+  if command_exists apt-get; then
+    echo "apt"
+  elif command_exists dnf; then
+    echo "dnf"
+  elif command_exists yum; then
+    echo "yum"
+  else
+    fail "Unsupported package manager. Expected apt, dnf, or yum."
+  fi
+}
+
+install_packages() {
+  local package_manager="$1"
+  shift
+
+  case "$package_manager" in
+    apt)
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update
+      apt-get install -y "$@"
+      ;;
+    dnf)
+      dnf install -y "$@"
+      ;;
+    yum)
+      yum install -y "$@"
+      ;;
+    *)
+      fail "Unsupported package manager: ${package_manager}"
+      ;;
+  esac
+}
+
+install_common_dependencies() {
+  local package_manager
+  package_manager="$(detect_package_manager)"
+
+  case "$package_manager" in
+    apt)
+      install_packages "$package_manager" git curl
+      ;;
+    dnf)
+      install_packages "$package_manager" git curl
+      ;;
+    yum)
+      install_packages "$package_manager" git curl
+      ;;
+  esac
+}
+
+install_direct_dependencies() {
+  local package_manager
+  package_manager="$(detect_package_manager)"
+
+  case "$package_manager" in
+    apt)
+      install_packages "$package_manager" git python3 python3-venv python3-pip curl
+      ;;
+    dnf)
+      install_packages "$package_manager" git python3 python3-pip python3-virtualenv curl
+      ;;
+    yum)
+      install_packages "$package_manager" git python3 python3-pip python3-virtualenv curl
+      ;;
+  esac
+}
+
+ensure_docker_installed() {
+  if command_exists docker; then
+    systemctl enable --now docker >/dev/null 2>&1 || true
+    ensure_docker_compose_available
+    return
+  fi
+
+  local package_manager
+  package_manager="$(detect_package_manager)"
+
+  log "Docker not found. Installing Docker because Docker mode was selected."
+  case "$package_manager" in
+    apt)
+      install_packages "$package_manager" git docker.io
+      ;;
+    dnf)
+      install_packages "$package_manager" git docker
+      ;;
+    yum)
+      install_packages "$package_manager" git docker
+      ;;
+  esac
+
+  systemctl enable --now docker
+  ensure_docker_compose_available
+}
+
+ensure_docker_compose_available() {
+  local package_manager
+
+  if docker compose version >/dev/null 2>&1; then
+    return
+  fi
+
+  if command_exists docker-compose; then
+    return
+  fi
+
+  package_manager="$(detect_package_manager)"
+  log "Docker Compose not found. Installing it because Docker mode was selected."
+
+  case "$package_manager" in
+    apt)
+      if apt-cache show docker-compose-plugin >/dev/null 2>&1; then
+        install_packages "$package_manager" docker-compose-plugin
+      else
+        install_packages "$package_manager" docker-compose
+      fi
+      ;;
+    dnf)
+      install_packages "$package_manager" docker-compose-plugin || install_packages "$package_manager" docker-compose
+      ;;
+    yum)
+      install_packages "$package_manager" docker-compose-plugin || install_packages "$package_manager" docker-compose
+      ;;
+  esac
+
+  if ! docker compose version >/dev/null 2>&1 && ! command_exists docker-compose; then
+    fail "Docker Compose is required for Docker installs."
+  fi
+}
+
+docker_compose() {
+  if docker compose version >/dev/null 2>&1; then
+    docker compose -p "${DOCKER_COMPOSE_PROJECT}" -f "${DOCKER_COMPOSE_FILE}" "$@"
+    return
+  fi
+
+  if command_exists docker-compose; then
+    docker-compose -p "${DOCKER_COMPOSE_PROJECT}" -f "${DOCKER_COMPOSE_FILE}" "$@"
+    return
+  fi
+
+  fail "Docker Compose is not available."
+}
+
+detect_nologin_shell() {
+  if [ -x "/usr/sbin/nologin" ]; then
+    echo "/usr/sbin/nologin"
+  elif [ -x "/sbin/nologin" ]; then
+    echo "/sbin/nologin"
+  else
+    echo "/bin/false"
+  fi
+}
+
+ensure_app_user() {
+  if getent group "${APP_GROUP}" >/dev/null 2>&1; then
+    CREATED_APP_GROUP="false"
+  else
+    groupadd --system "${APP_GROUP}"
+    CREATED_APP_GROUP="true"
+  fi
+
+  if id -u "${APP_USER}" >/dev/null 2>&1; then
+    CREATED_APP_USER="false"
+    return
+  fi
+
+  useradd \
+    --system \
+    --gid "${APP_GROUP}" \
+    --home-dir "${INSTALL_DIR}" \
+    --shell "$(detect_nologin_shell)" \
+    "${APP_USER}"
+  CREATED_APP_USER="true"
+}
+
+sync_repo() {
+  mkdir -p "$(dirname "${INSTALL_DIR}")"
+
+  if [ -d "${INSTALL_DIR}/.git" ]; then
+    log "Updating repository in ${INSTALL_DIR}"
+    git -C "${INSTALL_DIR}" pull --ff-only
+    return
+  fi
+
+  if [ -d "${INSTALL_DIR}" ] && [ -n "$(ls -A "${INSTALL_DIR}" 2>/dev/null)" ]; then
+    fail "${INSTALL_DIR} exists and is not an existing git checkout."
+  fi
+
+  rm -rf "${INSTALL_DIR}"
+  log "Cloning ${GIT_REPO_URL} into ${INSTALL_DIR}"
+  git clone "${GIT_REPO_URL}" "${INSTALL_DIR}"
+}
+
+ensure_env_file() {
+  local env_path="${INSTALL_DIR}/${ENV_FILE_NAME}"
+
+  if [ -f "${env_path}" ]; then
+    return
+  fi
+
+  if [ -f "${INSTALL_DIR}/.env.example" ]; then
+    cp "${INSTALL_DIR}/.env.example" "${env_path}"
+    return
+  fi
+
+  touch "${env_path}"
+}
+
+set_env_value() {
+  local file_path="$1"
+  local key="$2"
+  local value="$3"
+  local temp_file
+
+  touch "${file_path}"
+  temp_file="$(mktemp)"
+
+  awk -v key="${key}" -v value="${value}" '
+    BEGIN { updated = 0 }
+    index($0, key "=") == 1 {
+      print key "=" value
+      updated = 1
+      next
+    }
+    { print }
+    END {
+      if (!updated) {
+        print key "=" value
+      }
+    }
+  ' "${file_path}" >"${temp_file}"
+
+  mv "${temp_file}" "${file_path}"
+}
+
+get_env_value() {
+  local file_path="$1"
+  local key="$2"
+
+  if [ ! -f "${file_path}" ]; then
+    return
+  fi
+
+  awk -F= -v key="${key}" '$1 == key { sub(/^[^=]*=/, "", $0); print; exit }' "${file_path}"
+}
+
+validate_port() {
+  local port="$1"
+
+  if ! [[ "${port}" =~ ^[0-9]+$ ]]; then
+    fail "Port must be a number."
+  fi
+
+  if [ "${port}" -lt 1 ] || [ "${port}" -gt 65535 ]; then
+    fail "Port must be between 1 and 65535."
+  fi
+}
+
+prompt_app_settings() {
+  APP_PORT="$(prompt_with_default "Enter the host port for ${PROJECT_NAME}" "${DEFAULT_PORT}")"
+  validate_port "${APP_PORT}"
+
+  PUBLIC_BASE_URL="$(prompt_with_default "Enter PUBLIC_BASE_URL" "http://localhost:${APP_PORT}")"
+}
+
+prompt_admin_settings() {
+  local env_path="${INSTALL_DIR}/${ENV_FILE_NAME}"
+  local current_admin_username current_admin_password current_secret_key
+
+  current_admin_username="$(get_env_value "${env_path}" "DEFAULT_ADMIN_USERNAME")"
+  current_admin_password="$(get_env_value "${env_path}" "DEFAULT_ADMIN_PASSWORD")"
+  current_secret_key="$(get_env_value "${env_path}" "SECRET_KEY")"
+
+  if [ -z "${current_admin_username}" ]; then
+    current_admin_username="admin"
+  fi
+
+  if [ -z "${current_admin_password}" ] || [ "${current_admin_password}" = "admin123" ]; then
+    current_admin_password="$(generate_random_string)"
+  fi
+
+  if [ -z "${current_secret_key}" ] || [ "${current_secret_key}" = "change-this-in-production" ] || [ "${current_secret_key}" = "dev-secret-key-change-me" ]; then
+    current_secret_key="$(generate_random_string)"
+  fi
+
+  ADMIN_USERNAME="$(prompt_with_default "Enter the default admin username" "${current_admin_username}")"
+  ADMIN_PASSWORD="$(prompt_with_default "Enter the default admin password" "${current_admin_password}")"
+  SECRET_KEY_VALUE="${current_secret_key}"
+}
+
+detect_postgresql_service() {
+  local candidate
+
+  for candidate in postgresql postgresql.service; do
+    if systemctl list-unit-files "${candidate}" --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "${candidate}"; then
+      echo "${candidate}"
+      return
+    fi
+  done
+
+  candidate="$(systemctl list-unit-files --type=service --no-legend 'postgresql*.service' 2>/dev/null | awk 'NR==1 { print $1 }')"
+  if [ -n "${candidate}" ]; then
+    echo "${candidate}"
+    return
+  fi
+
+  echo "postgresql"
+}
+
+install_postgresql_packages() {
+  local package_manager
+  package_manager="$(detect_package_manager)"
+
+  case "${package_manager}" in
+    apt)
+      install_packages "${package_manager}" postgresql postgresql-contrib
+      ;;
+    dnf)
+      install_packages "${package_manager}" postgresql-server postgresql
+      ;;
+    yum)
+      install_packages "${package_manager}" postgresql-server postgresql
+      ;;
+  esac
+}
+
+ensure_postgresql_initialized() {
+  if command_exists postgresql-setup; then
+    postgresql-setup --initdb >/dev/null 2>&1 || true
+  fi
+}
+
+ensure_postgresql_running() {
+  POSTGRES_SERVICE_NAME="$(detect_postgresql_service)"
+  systemctl enable --now "${POSTGRES_SERVICE_NAME}"
+}
+
+validate_pg_identifier() {
+  local value="$1"
+  if ! [[ "${value}" =~ ^[A-Za-z0-9_]+$ ]]; then
+    fail "Only letters, numbers, and underscores are allowed for PostgreSQL database and username values."
+  fi
+}
+
+configure_local_postgresql() {
+  local install_mode="$1"
+  local db_host sql_password
+
+  install_postgresql_packages
+  ensure_postgresql_initialized
+  ensure_postgresql_running
+
+  POSTGRES_DB="$(prompt_with_default "Enter the PostgreSQL database name" "${POSTGRES_DB}")"
+  POSTGRES_USER="$(prompt_with_default "Enter the PostgreSQL username" "${POSTGRES_USER}")"
+  POSTGRES_PASSWORD="$(prompt_with_default "Enter the PostgreSQL password" "$(generate_random_string)")"
+
+  validate_pg_identifier "${POSTGRES_DB}"
+  validate_pg_identifier "${POSTGRES_USER}"
+  if ! [[ "${POSTGRES_PASSWORD}" =~ ^[A-Za-z0-9_]+$ ]]; then
+    fail "Use letters, numbers, or underscores for the PostgreSQL password."
+  fi
+
+  sql_password="${POSTGRES_PASSWORD//\'/\'\'}"
+
+  su - postgres -s /bin/bash -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='${POSTGRES_USER}'\" | grep -q 1 || psql -c \"CREATE ROLE ${POSTGRES_USER} LOGIN PASSWORD '${sql_password}';\""
+  su - postgres -s /bin/bash -c "psql -tAc \"SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}'\" | grep -q 1 || psql -c \"CREATE DATABASE ${POSTGRES_DB} OWNER ${POSTGRES_USER};\""
+
+  if [ "${install_mode}" = "docker" ]; then
+    db_host="host.docker.internal"
+  else
+    db_host="localhost"
+  fi
+
+  DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${db_host}:5432/${POSTGRES_DB}"
+  POSTGRES_MODE="host"
+}
+
+configure_compose_postgresql() {
+  POSTGRES_DB="$(prompt_with_default "Enter the PostgreSQL database name" "${POSTGRES_DB}")"
+  POSTGRES_USER="$(prompt_with_default "Enter the PostgreSQL username" "${POSTGRES_USER}")"
+  POSTGRES_PASSWORD="$(prompt_with_default "Enter the PostgreSQL password" "$(generate_random_string)")"
+
+  validate_pg_identifier "${POSTGRES_DB}"
+  validate_pg_identifier "${POSTGRES_USER}"
+  if ! [[ "${POSTGRES_PASSWORD}" =~ ^[A-Za-z0-9_]+$ ]]; then
+    fail "Use letters, numbers, or underscores for the PostgreSQL password."
+  fi
+
+  DATABASE_URL="postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${DOCKER_POSTGRES_SERVICE}:5432/${POSTGRES_DB}"
+  POSTGRES_SERVICE_NAME=""
+  POSTGRES_MODE="compose"
+}
+
+normalize_docker_database_url() {
+  if [[ "${DATABASE_URL}" == *"@localhost:"* ]]; then
+    DATABASE_URL="${DATABASE_URL/@localhost:/@host.docker.internal:}"
+    return
+  fi
+
+  if [[ "${DATABASE_URL}" == *"@127.0.0.1:"* ]]; then
+    DATABASE_URL="${DATABASE_URL/@127.0.0.1:/@host.docker.internal:}"
+  fi
+}
+
+configure_existing_postgresql() {
+  local install_mode="$1"
+  local env_path="${INSTALL_DIR}/${ENV_FILE_NAME}"
+  local existing_database_url default_database_url
+
+  existing_database_url="$(get_env_value "${env_path}" "DATABASE_URL")"
+  if [ -z "${existing_database_url}" ]; then
+    existing_database_url="postgresql+psycopg://postgres:postgres@localhost:5432/${PROJECT_SLUG}"
+  fi
+
+  default_database_url="${existing_database_url}"
+  DATABASE_URL="$(prompt_with_default "Enter the DATABASE_URL to use" "${default_database_url}")"
+  POSTGRES_MODE="existing"
+  POSTGRES_SERVICE_NAME=""
+
+  if [ "${install_mode}" = "docker" ]; then
+    normalize_docker_database_url
+  fi
+}
+
+prompt_postgresql_mode() {
+  local install_mode="$1"
+  local postgres_choice
+
+  echo
+  echo "PostgreSQL options:"
+  if [ "${install_mode}" = "docker" ]; then
+    echo "1) Use the Docker Compose PostgreSQL container"
+    echo "2) Use an existing PostgreSQL instance"
+    read -r -p "Select a PostgreSQL option [1-2]: " postgres_choice
+
+    case "${postgres_choice}" in
+      1) configure_compose_postgresql ;;
+      2) configure_existing_postgresql "${install_mode}" ;;
+      *) fail "Invalid PostgreSQL option." ;;
+    esac
+    return
+  fi
+
+  echo "1) Use an existing PostgreSQL instance"
+  echo "2) Install and manage PostgreSQL on this host"
+  read -r -p "Select a PostgreSQL option [1-2]: " postgres_choice
+
+  case "${postgres_choice}" in
+    1) configure_existing_postgresql "${install_mode}" ;;
+    2) configure_local_postgresql "${install_mode}" ;;
+    *) fail "Invalid PostgreSQL option." ;;
+  esac
+}
+
+write_env_file() {
+  local install_mode="$1"
+  local env_path="${INSTALL_DIR}/${ENV_FILE_NAME}"
+  local runtime_port
+
+  if [ "${install_mode}" = "docker" ]; then
+    runtime_port="${DOCKER_INTERNAL_PORT}"
+  else
+    runtime_port="${APP_PORT}"
+  fi
+
+  ensure_env_file
+  set_env_value "${env_path}" "APP_NAME" "${PROJECT_NAME}"
+  set_env_value "${env_path}" "APP_HOST_PORT" "${APP_PORT}"
+  set_env_value "${env_path}" "HOST" "0.0.0.0"
+  set_env_value "${env_path}" "PORT" "${runtime_port}"
+  set_env_value "${env_path}" "PUBLIC_BASE_URL" "${PUBLIC_BASE_URL}"
+  set_env_value "${env_path}" "DATABASE_URL" "${DATABASE_URL}"
+  set_env_value "${env_path}" "POSTGRES_DB" "${POSTGRES_DB}"
+  set_env_value "${env_path}" "POSTGRES_USER" "${POSTGRES_USER}"
+  set_env_value "${env_path}" "POSTGRES_PASSWORD" "${POSTGRES_PASSWORD}"
+  set_env_value "${env_path}" "DEFAULT_ADMIN_USERNAME" "${ADMIN_USERNAME}"
+  set_env_value "${env_path}" "DEFAULT_ADMIN_PASSWORD" "${ADMIN_PASSWORD}"
+  set_env_value "${env_path}" "SECRET_KEY" "${SECRET_KEY_VALUE}"
+}
+
+setup_python_environment() {
+  log "Installing Python dependencies"
+  python3 -m venv "${VENV_DIR}"
+  "${VENV_DIR}/bin/pip" install --upgrade pip
+  "${VENV_DIR}/bin/pip" install -r "${INSTALL_DIR}/requirements.txt"
+}
+
+write_systemd_service() {
+  cat >"${SYSTEMD_SERVICE_FILE}" <<EOF
+[Unit]
+Description=${PROJECT_NAME} service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${APP_USER}
+Group=${APP_GROUP}
+WorkingDirectory=${INSTALL_DIR}
+EnvironmentFile=${INSTALL_DIR}/${ENV_FILE_NAME}
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash -lc 'cd ${INSTALL_DIR} && exec ${VENV_DIR}/bin/python -m uvicorn app.main:app --host \${HOST:-0.0.0.0} --port \${PORT:-${DEFAULT_PORT}}'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable --now "${SYSTEMD_SERVICE_NAME}"
+}
+
+write_state_file() {
+  mkdir -p "${INSTALL_DIR}"
+  {
+    printf 'INSTALL_MODE=%q\n' "${INSTALL_MODE}"
+    printf 'APP_PORT=%q\n' "${APP_PORT}"
+    printf 'PUBLIC_BASE_URL=%q\n' "${PUBLIC_BASE_URL}"
+    printf 'POSTGRES_MODE=%q\n' "${POSTGRES_MODE}"
+    printf 'POSTGRES_SERVICE_NAME=%q\n' "${POSTGRES_SERVICE_NAME}"
+    printf 'POSTGRES_DB=%q\n' "${POSTGRES_DB}"
+    printf 'POSTGRES_USER=%q\n' "${POSTGRES_USER}"
+    printf 'CREATED_APP_USER=%q\n' "${CREATED_APP_USER}"
+    printf 'CREATED_APP_GROUP=%q\n' "${CREATED_APP_GROUP}"
+  } >"${INSTALL_STATE_FILE}"
+}
+
+load_state() {
+  if [ -f "${INSTALL_STATE_FILE}" ]; then
+    # shellcheck disable=SC1090
+    . "${INSTALL_STATE_FILE}"
+    if [ -z "${APP_PORT}" ]; then
+      APP_PORT="${DEFAULT_PORT}"
+    fi
+    if [ -z "${POSTGRES_MODE}" ]; then
+      if [ "${MANAGED_POSTGRES}" = "true" ]; then
+        POSTGRES_MODE="host"
+      else
+        POSTGRES_MODE="existing"
+      fi
+    fi
+    return
+  fi
+
+  INSTALL_MODE=""
+}
+
+start_or_restart_systemd_service() {
+  systemctl restart "${SYSTEMD_SERVICE_NAME}"
+}
+
+wait_for_compose_postgresql() {
+  local container_id
+  local health_status
+  local attempt=0
+
+  container_id="$(docker_compose ps -q "${DOCKER_POSTGRES_SERVICE}")"
+  if [ -z "${container_id}" ]; then
+    fail "Could not find the PostgreSQL container in the Docker Compose project."
+  fi
+
+  while [ "${attempt}" -lt 30 ]; do
+    health_status="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${container_id}" 2>/dev/null || true)"
+    if [ "${health_status}" = "healthy" ]; then
+      return
+    fi
+
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+
+  fail "Docker Compose PostgreSQL did not become healthy in time."
+}
+
+run_docker_stack() {
+  docker_compose down --remove-orphans >/dev/null 2>&1 || true
+  docker rm -f "${DOCKER_LEGACY_CONTAINER}" >/dev/null 2>&1 || true
+  docker image rm "${DOCKER_LEGACY_IMAGE}" >/dev/null 2>&1 || true
+
+  if [ "${POSTGRES_MODE}" = "compose" ]; then
+    docker_compose up -d "${DOCKER_POSTGRES_SERVICE}"
+    wait_for_compose_postgresql
+  fi
+
+  docker_compose up -d --build "${DOCKER_APP_SERVICE}"
+}
+
+stop_and_remove_docker() {
+  if [ -f "${DOCKER_COMPOSE_FILE}" ]; then
+    docker_compose down --remove-orphans >/dev/null 2>&1 || true
+  fi
+
+  docker rm -f "${DOCKER_LEGACY_CONTAINER}" >/dev/null 2>&1 || true
+  docker image rm "${DOCKER_LEGACY_IMAGE}" >/dev/null 2>&1 || true
+  docker image rm "${DOCKER_APP_IMAGE}" >/dev/null 2>&1 || true
+}
+
+drop_managed_postgresql() {
+  if [ "${POSTGRES_MODE}" = "compose" ]; then
+    if ! confirm_default_yes "Remove the Docker Compose PostgreSQL volume for ${PROJECT_NAME}?"; then
+      return
+    fi
+
+    if command_exists docker; then
+      docker volume rm -f "${DOCKER_POSTGRES_VOLUME}" >/dev/null 2>&1 || true
+    fi
+    return
+  fi
+
+  if [ "${POSTGRES_MODE}" != "host" ]; then
+    return
+  fi
+
+  if ! confirm_default_yes "Drop the managed PostgreSQL database and user for ${PROJECT_NAME}?"; then
+    return
+  fi
+
+  if [ -n "${POSTGRES_SERVICE_NAME}" ]; then
+    systemctl enable --now "${POSTGRES_SERVICE_NAME}" >/dev/null 2>&1 || true
+  fi
+
+  if [ -n "${POSTGRES_DB}" ]; then
+    su - postgres -s /bin/bash -c "psql -d postgres -c \"SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = '${POSTGRES_DB}' AND pid <> pg_backend_pid();\"" >/dev/null 2>&1 || true
+    su - postgres -s /bin/bash -c "psql -d postgres -c \"DROP DATABASE IF EXISTS ${POSTGRES_DB};\""
+  fi
+
+  if [ -n "${POSTGRES_USER}" ]; then
+    su - postgres -s /bin/bash -c "psql -d postgres -c \"DROP ROLE IF EXISTS ${POSTGRES_USER};\""
+  fi
+}
+
+remove_app_user_if_created() {
+  if [ "${CREATED_APP_USER}" = "true" ] && id -u "${APP_USER}" >/dev/null 2>&1; then
+    userdel "${APP_USER}" >/dev/null 2>&1 || true
+  fi
+
+  if [ "${CREATED_APP_GROUP}" = "true" ] && getent group "${APP_GROUP}" >/dev/null 2>&1; then
+    groupdel "${APP_GROUP}" >/dev/null 2>&1 || true
+  fi
+}
+
+install_direct_ftp2s3() {
+  INSTALL_MODE="direct"
+  install_direct_dependencies
+  ensure_app_user
+  sync_repo
+  ensure_env_file
+  prompt_app_settings
+  prompt_admin_settings
+  prompt_postgresql_mode "direct"
+  write_env_file "direct"
+  setup_python_environment
+  chown -R "${APP_USER}:${APP_GROUP}" "${INSTALL_DIR}"
+  write_systemd_service
+  write_state_file
+
+  log "Direct install complete."
+  log "Service: ${SYSTEMD_SERVICE_NAME}"
+  log "URL: ${PUBLIC_BASE_URL}"
+  log "PostgreSQL mode: ${POSTGRES_MODE}"
+  log "Default admin username: ${ADMIN_USERNAME}"
+  log "Default admin password: ${ADMIN_PASSWORD}"
+}
+
+install_docker_ftp2s3() {
+  INSTALL_MODE="docker"
+  install_common_dependencies
+  ensure_docker_installed
+  sync_repo
+  ensure_env_file
+  prompt_app_settings
+  prompt_admin_settings
+  prompt_postgresql_mode "docker"
+  write_env_file "docker"
+  run_docker_stack
+  write_state_file
+
+  log "Docker install complete."
+  log "Docker Compose project: ${DOCKER_COMPOSE_PROJECT}"
+  log "URL: ${PUBLIC_BASE_URL}"
+  log "PostgreSQL mode: ${POSTGRES_MODE}"
+  log "Default admin username: ${ADMIN_USERNAME}"
+  log "Default admin password: ${ADMIN_PASSWORD}"
+}
+
+install_ftp2s3() {
+  local install_choice
+
+  require_root
+  ensure_linux
+
+  echo
+  echo "Install options:"
+  echo "1) Direct install (Python + systemd)"
+  echo "2) Docker install"
+  read -r -p "Select an install option [1-2]: " install_choice
+
+  case "${install_choice}" in
+    1) install_direct_ftp2s3 ;;
+    2) install_docker_ftp2s3 ;;
+    *) fail "Invalid install option." ;;
+  esac
+}
+
+update_direct_install() {
+  install_direct_dependencies
+  ensure_app_user
+  sync_repo
+  setup_python_environment
+  chown -R "${APP_USER}:${APP_GROUP}" "${INSTALL_DIR}"
+  if [ -f "${SYSTEMD_SERVICE_FILE}" ]; then
+    systemctl daemon-reload
+    start_or_restart_systemd_service
+  else
+    write_systemd_service
+  fi
+  log "Direct install updated."
+}
+
+update_docker_install() {
+  install_common_dependencies
+  ensure_docker_installed
+  sync_repo
+  run_docker_stack
+  log "Docker install updated."
+}
+
+update_ftp2s3() {
+  require_root
+  ensure_linux
+  load_state
+
+  if [ ! -d "${INSTALL_DIR}" ]; then
+    fail "${INSTALL_DIR} was not found. Install ${PROJECT_NAME} first."
+  fi
+
+  if [ ! -f "${INSTALL_DIR}/${ENV_FILE_NAME}" ]; then
+    fail "Missing ${INSTALL_DIR}/${ENV_FILE_NAME}. Update aborted."
+  fi
+
+  case "${INSTALL_MODE}" in
+    direct) update_direct_install ;;
+    docker) update_docker_install ;;
+    *)
+      if [ -f "${SYSTEMD_SERVICE_FILE}" ]; then
+        INSTALL_MODE="direct"
+        update_direct_install
+      else
+        fail "Unable to determine install mode. Expected ${INSTALL_STATE_FILE}."
+      fi
+      ;;
+  esac
+}
+
+uninstall_ftp2s3() {
+  require_root
+  ensure_linux
+  load_state
+
+  if [ -f "${SYSTEMD_SERVICE_FILE}" ]; then
+    systemctl stop "${SYSTEMD_SERVICE_NAME}" >/dev/null 2>&1 || true
+    systemctl disable "${SYSTEMD_SERVICE_NAME}" >/dev/null 2>&1 || true
+    rm -f "${SYSTEMD_SERVICE_FILE}"
+    systemctl daemon-reload
+  fi
+
+  if command_exists docker; then
+    stop_and_remove_docker
+  fi
+
+  drop_managed_postgresql
+
+  if [ -d "${INSTALL_DIR}" ]; then
+    rm -rf "${INSTALL_DIR}"
+  fi
+
+  remove_app_user_if_created
+
+  log "Uninstall complete. System packages were left in place."
+}
+
+show_menu() {
+  echo "========== ftp2s3 Installer =========="
+  echo "1) Install"
+  echo "2) Update"
+  echo "3) Uninstall"
+  echo "======================================="
+  read -p "Select an option [1-3]: " CHOICE
+  case $CHOICE in
+    1) install_ftp2s3 ;;
+    2) update_ftp2s3 ;;
+    3) uninstall_ftp2s3 ;;
+    *) echo "Invalid choice. Exiting." ; exit 1 ;;
+  esac
+}
+
+show_menu
