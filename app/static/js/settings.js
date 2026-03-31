@@ -62,6 +62,7 @@ function fillSiteForm(settings) {
   currentSiteSettings = settings;
   document.getElementById("public-base-url").value = settings.public_base_url || "";
   document.getElementById("object-database-url").value = settings.object_database_url || "";
+  document.getElementById("ftp-timeout").value = settings.ftp_timeout || 30;
   renderPreview();
 }
 
@@ -92,6 +93,7 @@ function siteFormValues(form) {
   return {
     public_base_url: String(formData.get("public_base_url") || "").trim(),
     object_database_url: String(formData.get("object_database_url") || "").trim(),
+    ftp_timeout: Number(formData.get("ftp_timeout") || 30),
   };
 }
 

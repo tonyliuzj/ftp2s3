@@ -468,6 +468,16 @@ th {
   color: var(--muted);
 }
 
+.setup-card {
+  width: min(100%, 920px);
+}
+
+.setup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
 .empty-state {
   padding: 20px;
   border-radius: var(--radius-md);

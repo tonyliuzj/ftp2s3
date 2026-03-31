@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 from threading import Lock
 from typing import Generator
 
 from sqlalchemy import create_engine, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
@@ -67,9 +69,23 @@ def _engine_kwargs(database_url: str) -> dict[str, object]:
     return kwargs
 
 
+def _ensure_sqlite_parent_dir(database_url: str) -> None:
+    if not database_url.startswith("sqlite:///"):
+        return
+
+    database_path = make_url(database_url).database
+    if not database_path or database_path == ":memory:" or database_path.startswith("file:"):
+        return
+
+    Path(database_path).expanduser().parent.mkdir(parents=True, exist_ok=True)
+
+
+_core_database_url = _validate_core_database_url(settings.database_url)
+_ensure_sqlite_parent_dir(_core_database_url)
+
 site_engine = create_engine(
-    _validate_core_database_url(settings.database_url),
-    **_engine_kwargs(settings.database_url),
+    _core_database_url,
+    **_engine_kwargs(_core_database_url),
 )
 SiteSessionLocal = sessionmaker(bind=site_engine, autoflush=False, autocommit=False, expire_on_commit=False)
 

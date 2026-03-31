@@ -1,4 +1,16 @@
-import { apiFetch, clearFlash, copyText, escapeHtml, formatDate, initializePage, renderTableRows, showFlash } from "/panel/js/common.js";
+import {
+  apiFetch,
+  clearFlash,
+  copyText,
+  escapeHtml,
+  formatDate,
+  getObjectDatabaseError,
+  initializePage,
+  isObjectDatabaseUnavailable,
+  renderTableRows,
+  setControlsDisabled,
+  showFlash,
+} from "/panel/js/common.js";
 
 let currentKeys = [];
 let latestCreated = null;
@@ -70,6 +82,20 @@ function renderKeys(keys) {
 async function refreshKeys() {
   currentKeys = await apiFetch("/admin/keys");
   renderKeys(currentKeys);
+}
+
+function renderUnavailableState(source) {
+  const message = getObjectDatabaseError(source);
+  currentKeys = [];
+  fillForm(null);
+  renderSecretPanel(null);
+  renderTableRows(
+    document.getElementById("keys-table"),
+    "",
+    "Object metadata database unavailable. Reconnect PostgreSQL and refresh this page.",
+  );
+  setControlsDisabled("#key-form", true);
+  showFlash(message, "warning");
 }
 
 async function handleSubmit(event) {
@@ -188,12 +214,20 @@ document.getElementById("copy-key-secret")?.addEventListener("click", async () =
   }
 });
 
-await initializePage("keys", "Keys", "Create and rotate multiple S3 access keys. One enabled key can be marked as the default for presigned direct links.", {
+const page = await initializePage("keys", "Keys", "Create and rotate multiple S3 access keys. One enabled key can be marked as the default for presigned direct links.", {
   requiresObjectDatabase: true,
 });
-await refreshKeys();
 fillForm(null);
 renderSecretPanel(null);
+if (isObjectDatabaseUnavailable(page.status)) {
+  renderUnavailableState(page.status);
+} else {
+  try {
+    await refreshKeys();
+  } catch (error) {
+    renderUnavailableState(error);
+  }
+}
 document.getElementById("key-form")?.addEventListener("submit", handleSubmit);
 document.getElementById("key-reset")?.addEventListener("click", () => {
   fillForm(null);

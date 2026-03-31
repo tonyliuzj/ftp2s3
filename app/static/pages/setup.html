@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ftp2s3 Setup</title>
+    <link rel="stylesheet" href="/panel/css/styles.css" />
+  </head>
+  <body class="login-page">
+    <div class="login-card setup-card">
+      <span class="eyebrow">First Run Setup</span>
+      <h1>ftp2s3</h1>
+      <p>Set up the local panel, PostgreSQL metadata connection, S3-facing defaults, and the first admin account from the UI.</p>
+      <div id="flash" class="flash"></div>
+      <form id="setup-form" class="form-grid">
+        <input id="postgres-host" type="hidden" />
+        <div class="setup-grid">
+          <section class="form-card">
+            <h3 class="section-title">PostgreSQL</h3>
+            <p class="section-subtitle">The object metadata database can be unavailable during setup. The panel will stay online and apply the saved PostgreSQL-backed settings later.</p>
+            <div class="field">
+              <label for="object-database-url">Object Metadata Database URL</label>
+              <input id="object-database-url" name="object_database_url" required />
+            </div>
+            <div class="field">
+              <label for="postgres-db">PostgreSQL Database</label>
+              <input id="postgres-db" name="postgres_db" required />
+            </div>
+            <div class="field">
+              <label for="postgres-user">PostgreSQL User</label>
+              <input id="postgres-user" name="postgres_user" required />
+            </div>
+            <div class="field">
+              <label for="postgres-password">PostgreSQL Password</label>
+              <input id="postgres-password" name="postgres_password" type="password" required />
+            </div>
+          </section>
+
+          <section class="form-card">
+            <h3 class="section-title">Admin Account</h3>
+            <p class="section-subtitle">This creates the first panel admin in SQLite. After setup, logins do not depend on PostgreSQL.</p>
+            <div class="field">
+              <label for="admin-username">Admin Username</label>
+              <input id="admin-username" name="admin_username" autocomplete="username" required />
+            </div>
+            <div class="field">
+              <label for="admin-password">Admin Password</label>
+              <input id="admin-password" name="admin_password" type="password" autocomplete="new-password" required />
+            </div>
+            <div class="field">
+              <label for="public-base-url">Public Base URL</label>
+              <input id="public-base-url" name="public_base_url" required />
+            </div>
+          </section>
+        </div>
+
+        <section class="form-card">
+          <h3 class="section-title">S3 Defaults</h3>
+          <p class="section-subtitle">These values are saved into PostgreSQL when available. If PostgreSQL is down, they are staged and applied automatically once it comes back.</p>
+          <div class="setup-grid">
+            <div class="field">
+              <label for="s3-service-name">Service Name</label>
+              <input id="s3-service-name" name="s3_service_name" required />
+            </div>
+            <div class="field">
+              <label for="s3-default-region">Default Region</label>
+              <input id="s3-default-region" name="s3_default_region" required />
+            </div>
+            <div class="field">
+              <label for="s3-access-key-id">Default Access Key ID</label>
+              <input id="s3-access-key-id" name="s3_access_key_id" required />
+            </div>
+            <div class="field">
+              <label for="s3-secret-access-key">Default Secret Access Key</label>
+              <input id="s3-secret-access-key" name="s3_secret_access_key" required />
+            </div>
+            <div class="field">
+              <label for="s3-max-clock-skew-seconds">Max Clock Skew Seconds</label>
+              <input id="s3-max-clock-skew-seconds" name="s3_max_clock_skew_seconds" type="number" min="0" max="3600" required />
+            </div>
+            <div class="field">
+              <label for="s3-presign-expiry-seconds">Default Presign Expiry Seconds</label>
+              <input id="s3-presign-expiry-seconds" name="s3_presign_expiry_seconds" type="number" min="60" max="604800" required />
+            </div>
+          </div>
+          <label class="field-inline">
+            <input id="s3-require-sigv4" name="s3_require_sigv4" type="checkbox" checked />
+            <span>Require SigV4 or presigned X-Amz auth</span>
+          </label>
+        </section>
+
+        <div class="actions">
+          <button class="btn btn-primary" type="submit">Complete Setup</button>
+        </div>
+        <p class="muted">`FTP_TIMEOUT` stays in the Settings page after setup so local runtime tuning is separate from first-run onboarding.</p>
+      </form>
+    </div>
+    <script type="module" src="/panel/js/setup.js"></script>
+  </body>
+</html>

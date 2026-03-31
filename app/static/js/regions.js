@@ -1,4 +1,15 @@
-import { apiFetch, clearFlash, escapeHtml, initializePage, loadRegions, renderTableRows, showFlash } from "/panel/js/common.js";
+import {
+  apiFetch,
+  clearFlash,
+  escapeHtml,
+  getObjectDatabaseError,
+  initializePage,
+  isObjectDatabaseUnavailable,
+  loadRegions,
+  renderTableRows,
+  setControlsDisabled,
+  showFlash,
+} from "/panel/js/common.js";
 
 let currentRegions = [];
 
@@ -40,6 +51,19 @@ function renderRegions(regions) {
 async function refreshRegions() {
   currentRegions = await loadRegions();
   renderRegions(currentRegions);
+}
+
+function renderUnavailableState(source) {
+  const message = getObjectDatabaseError(source);
+  currentRegions = [];
+  fillForm(null);
+  renderTableRows(
+    document.getElementById("regions-table"),
+    "",
+    "Object metadata database unavailable. Reconnect PostgreSQL and refresh this page.",
+  );
+  setControlsDisabled("#region-form", true);
+  showFlash(message, "warning");
 }
 
 async function handleSubmit(event) {
@@ -103,11 +127,19 @@ async function handleTableClick(event) {
   }
 }
 
-await initializePage("regions", "Regions", "Create the region catalog once, then pick from it whenever you create or update a bucket.", {
+const page = await initializePage("regions", "Regions", "Create the region catalog once, then pick from it whenever you create or update a bucket.", {
   requiresObjectDatabase: true,
 });
-await refreshRegions();
 fillForm(null);
+if (isObjectDatabaseUnavailable(page.status)) {
+  renderUnavailableState(page.status);
+} else {
+  try {
+    await refreshRegions();
+  } catch (error) {
+    renderUnavailableState(error);
+  }
+}
 document.getElementById("region-form")?.addEventListener("submit", handleSubmit);
 document.getElementById("region-reset")?.addEventListener("click", () => fillForm(null));
 document.getElementById("regions-table")?.addEventListener("click", handleTableClick);

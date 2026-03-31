@@ -7,12 +7,15 @@ import {
   escapeHtml,
   formatBytes,
   formatDate,
+  getObjectDatabaseError,
   getQueryParam,
   initializePage,
+  isObjectDatabaseUnavailable,
   loadBuckets,
   presignObjectUrl,
   renderBreadcrumbs,
   renderTableRows,
+  setControlsDisabled,
   setQueryParams,
   showFlash,
   uploadWithProgress,
@@ -24,14 +27,14 @@ let currentSearchQuery = "";
 let availableBuckets = [];
 let progressResetTimer = null;
 
-function fillBucketOptions(buckets) {
+function fillBucketOptions(buckets, emptyLabel = "Create a bucket first") {
   const select = document.getElementById("files-bucket");
   select.innerHTML = buckets
     .map((bucket) => `<option value="${escapeHtml(bucket.name)}">${escapeHtml(bucket.name)}</option>`)
     .join("");
   select.disabled = buckets.length === 0;
   if (!buckets.length) {
-    select.innerHTML = '<option value="">Create a bucket first</option>';
+    select.innerHTML = `<option value="">${escapeHtml(emptyLabel)}</option>`;
   }
 }
 
@@ -365,20 +368,56 @@ async function clearSearch() {
   await renderListing();
 }
 
-await initializePage("files", "File Browser", "Browse folders, upload files, search indexed object paths, and open S3-style direct links from one place.", {
+function renderUnavailableState(source) {
+  const message = getObjectDatabaseError(source);
+  availableBuckets = [];
+  currentBucket = "";
+  currentPrefix = "";
+  currentSearchQuery = "";
+  fillBucketOptions([], "Object metadata database unavailable");
+  document.getElementById("files-search-query").value = "";
+  document.getElementById("upload-object-key").value = "";
+  document.getElementById("files-breadcrumbs").innerHTML = "";
+  document.getElementById("files-breadcrumbs").hidden = true;
+  document.getElementById("upload-path-hint").textContent = "Uploads are unavailable while the object database is offline.";
+  updateModeChrome({
+    title: "Indexed Files Unavailable",
+    subtitle: "The panel is online, but PostgreSQL-backed object metadata is currently unavailable.",
+    hint: "Reconnect PostgreSQL and refresh this page to load buckets, browsing, search, and uploads.",
+  });
+  renderUploadedLink("");
+  renderTableRows(
+    document.getElementById("files-table"),
+    "",
+    "Object metadata database unavailable. Reconnect PostgreSQL and refresh this page.",
+  );
+  setControlsDisabled("#files-search-form", true);
+  setControlsDisabled("#upload-form", true);
+  showFlash(message, "warning");
+}
+
+const page = await initializePage("files", "File Browser", "Browse folders, upload files, search indexed object paths, and open S3-style direct links from one place.", {
   requiresObjectDatabase: true,
 });
-availableBuckets = await loadBuckets();
-fillBucketOptions(availableBuckets);
-currentBucket = getQueryParam("bucket") || availableBuckets[0]?.name || "";
-currentPrefix = getQueryParam("prefix") || "";
-currentSearchQuery = getQueryParam("q") || "";
-if (currentBucket) {
-  document.getElementById("files-bucket").value = currentBucket;
-}
-document.getElementById("files-search-query").value = currentSearchQuery;
 resetUploadProgress();
-await renderListing();
+if (isObjectDatabaseUnavailable(page.status)) {
+  renderUnavailableState(page.status);
+} else {
+  try {
+    availableBuckets = await loadBuckets();
+    fillBucketOptions(availableBuckets);
+    currentBucket = getQueryParam("bucket") || availableBuckets[0]?.name || "";
+    currentPrefix = getQueryParam("prefix") || "";
+    currentSearchQuery = getQueryParam("q") || "";
+    if (currentBucket) {
+      document.getElementById("files-bucket").value = currentBucket;
+    }
+    document.getElementById("files-search-query").value = currentSearchQuery;
+    await renderListing();
+  } catch (error) {
+    renderUnavailableState(error);
+  }
+}
 document.getElementById("files-bucket")?.addEventListener("change", handleBucketChange);
 document.getElementById("upload-form")?.addEventListener("submit", handleUpload);
 document.getElementById("files-table")?.addEventListener("click", handleTableClick);

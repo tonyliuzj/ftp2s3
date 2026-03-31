@@ -23,19 +23,19 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-4. Update `.env` with the local SQLite path and the PostgreSQL object metadata connection string.
+4. Adjust `.env` only for runtime basics if needed.
 
 Example:
 
 ```env
 APP_DATABASE_URL=sqlite:///./data/app.db
-OBJECT_DATABASE_URL=postgresql+psycopg://postgres:postgres@localhost:5432/ftp2s3
-PUBLIC_BASE_URL=http://localhost:8000
-DEFAULT_ADMIN_USERNAME=admin
-DEFAULT_ADMIN_PASSWORD=admin123
+POSTGRES_HOST=localhost
+POSTGRES_DB=ftp2s3
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
 ```
 
-5. Start PostgreSQL and create the database named in `OBJECT_DATABASE_URL`.
+5. Start PostgreSQL.
 
 6. Start the app.
 
@@ -43,11 +43,13 @@ DEFAULT_ADMIN_PASSWORD=admin123
 uvicorn app.main:app --reload
 ```
 
-7. Open:
+7. Open the admin panel and complete first-run setup:
 
 - Admin panel: `http://localhost:8000/panel/pages/login.html`
 - API docs: `http://localhost:8000/docs`
 - Health check: `http://localhost:8000/health`
+
+On first visit, the panel redirects to `/panel/pages/setup.html` and asks for the PostgreSQL connection, the first admin account, the public base URL, and the initial S3 defaults/access key. `FTP_TIMEOUT` is managed later from the Settings page.
 
 ## Quick Installation (One-Click)
 
@@ -70,18 +72,16 @@ For a manual Docker deployment:
 cp .env.example .env
 ```
 
-2. Set the Docker-facing database URL in `.env`.
+2. Keep or adjust the Compose defaults in `.env`.
 
 Example:
 
 ```env
 APP_HOST_PORT=8000
-APP_DATABASE_URL=sqlite:////app/data/app.db
-OBJECT_DATABASE_URL=postgresql+psycopg://ftp2s3:change-me@postgres:5432/ftp2s3
+POSTGRES_HOST=localhost
 POSTGRES_DB=ftp2s3
-POSTGRES_USER=ftp2s3
-POSTGRES_PASSWORD=change-me
-PUBLIC_BASE_URL=http://localhost:8000
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
 ```
 
 3. Start the stack.
@@ -90,7 +90,7 @@ PUBLIC_BASE_URL=http://localhost:8000
 docker compose up -d --build
 ```
 
-4. Open:
+4. Open the admin panel and complete first-run setup:
 
 - Admin panel: `http://localhost:8000/panel/pages/login.html`
 - API docs: `http://localhost:8000/docs`
@@ -132,14 +132,16 @@ Admin routes include:
 
 This project is intentionally not a full S3 implementation. It is path-style only and returns JSON responses rather than S3 XML.
 
-## Default Admin Login
+## First Run Setup
 
-On first startup, the app creates the default admin from:
+On first panel visit, `ftp2s3` redirects to the setup page instead of relying on env-defined admin credentials. The setup page stores:
 
-- `DEFAULT_ADMIN_USERNAME`
-- `DEFAULT_ADMIN_PASSWORD`
+- local site settings in SQLite
+- the first admin user in SQLite
+- PostgreSQL-backed object settings and access key defaults when PostgreSQL is reachable
+- pending PostgreSQL-backed object settings in SQLite if PostgreSQL is temporarily unavailable
 
-Change both for real deployments.
+After setup, normal logins use the created admin account.
 
 ## S3 Connection Notes
 
@@ -157,13 +159,7 @@ Example object URL:
 http://localhost:8000/my-bucket/path/to/file.txt
 ```
 
-Example bootstrap S3 settings:
-
-```env
-S3_DEFAULT_REGION=us-east-1
-S3_ACCESS_KEY_ID=ftp2s3-access-key
-S3_SECRET_ACCESS_KEY=ftp2s3-secret-key-change-me
-```
+S3 defaults and the initial access key are configured from the setup page.
 
 ## Project Layout
 

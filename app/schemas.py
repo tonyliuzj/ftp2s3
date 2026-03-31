@@ -36,6 +36,86 @@ class LoginResponse(BaseModel):
     user: AdminUserResponse
 
 
+class SetupStatusResponse(BaseModel):
+    needs_setup: bool
+    app_name: str
+    object_database_url: str
+    postgres_host: str
+    postgres_db: str
+    postgres_user: str
+    postgres_password: str
+    default_admin_username: str
+    default_admin_password: str
+    public_base_url: str
+    s3_service_name: str
+    s3_default_region: str
+    s3_access_key_id: str
+    s3_secret_access_key: str
+    s3_require_sigv4: bool
+    s3_max_clock_skew_seconds: int
+    s3_presign_expiry_seconds: int
+
+
+class SetupRequest(BaseModel):
+    object_database_url: str = Field(min_length=1, max_length=2000)
+    postgres_db: str = Field(min_length=1, max_length=100)
+    postgres_user: str = Field(min_length=1, max_length=100)
+    postgres_password: str = Field(min_length=1, max_length=255)
+    admin_username: str = Field(min_length=1, max_length=100)
+    admin_password: str = Field(min_length=1, max_length=255)
+    public_base_url: str = Field(min_length=1, max_length=500)
+    s3_service_name: str = Field(min_length=1, max_length=50)
+    s3_default_region: str = Field(min_length=3, max_length=32)
+    s3_access_key_id: str = Field(min_length=6, max_length=100)
+    s3_secret_access_key: str = Field(min_length=16, max_length=255)
+    s3_require_sigv4: bool
+    s3_max_clock_skew_seconds: int = Field(ge=0, le=3600)
+    s3_presign_expiry_seconds: int = Field(ge=60, le=604800)
+
+    @field_validator("object_database_url")
+    @classmethod
+    def validate_object_database_url(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")):
+            raise ValueError("Object database URL must be a PostgreSQL SQLAlchemy URL.")
+        return normalized
+
+    @field_validator("postgres_db", "postgres_user", "admin_username", "s3_service_name", "s3_access_key_id")
+    @classmethod
+    def strip_required_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("This field is required.")
+        return normalized
+
+    @field_validator("postgres_password", "admin_password", "s3_secret_access_key")
+    @classmethod
+    def strip_secret_text(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("This field is required.")
+        return normalized
+
+    @field_validator("public_base_url")
+    @classmethod
+    def validate_public_base_url(cls, value: str) -> str:
+        normalized = value.strip().rstrip("/")
+        if not normalized.startswith(("http://", "https://")):
+            raise ValueError("Public base URL must start with http:// or https://.")
+        return normalized
+
+    @field_validator("s3_default_region")
+    @classmethod
+    def validate_setup_region(cls, value: str) -> str:
+        return _validate_region(value)
+
+
+class SetupResponse(BaseModel):
+    message: str
+    object_database_available: bool
+    object_database_error: str | None = None
+
+
 class ZoneServerWrite(BaseModel):
     id: int | None = None
     name: str = Field(min_length=1, max_length=100)
@@ -411,11 +491,13 @@ class SystemStatusResponse(BaseModel):
 class SiteSettingsRead(BaseModel):
     public_base_url: str
     object_database_url: str
+    ftp_timeout: int
 
 
 class SiteSettingsUpdate(BaseModel):
     public_base_url: str = Field(min_length=1, max_length=500)
     object_database_url: str = Field(min_length=1, max_length=2000)
+    ftp_timeout: int = Field(ge=1, le=3600)
 
     @field_validator("public_base_url")
     @classmethod

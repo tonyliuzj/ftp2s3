@@ -26,6 +26,10 @@
                 <label for="object-database-url">Object Metadata Database URL</label>
                 <input id="object-database-url" name="object_database_url" placeholder="postgresql+psycopg://user:password@host:5432/ftp2s3" required />
               </div>
+              <div class="field">
+                <label for="ftp-timeout">FTP Timeout Seconds</label>
+                <input id="ftp-timeout" name="ftp_timeout" type="number" min="1" max="3600" required />
+              </div>
               <div class="actions">
                 <button class="btn btn-primary" type="submit">Save Local Settings</button>
               </div>

@@ -1,4 +1,15 @@
-import { apiFetch, clearFlash, escapeHtml, initializePage, loadZones, renderTableRows, showFlash } from "/panel/js/common.js";
+import {
+  apiFetch,
+  clearFlash,
+  escapeHtml,
+  getObjectDatabaseError,
+  initializePage,
+  isObjectDatabaseUnavailable,
+  loadZones,
+  renderTableRows,
+  setControlsDisabled,
+  showFlash,
+} from "/panel/js/common.js";
 
 let currentZones = [];
 
@@ -144,6 +155,19 @@ async function refreshZones() {
   renderZones(currentZones);
 }
 
+function renderUnavailableState(source) {
+  const message = getObjectDatabaseError(source);
+  currentZones = [];
+  fillForm(null);
+  renderTableRows(
+    document.getElementById("zones-table"),
+    "",
+    "Object metadata database unavailable. Reconnect PostgreSQL and refresh this page.",
+  );
+  setControlsDisabled("#zone-form", true);
+  showFlash(message, "warning");
+}
+
 async function handleSubmit(event) {
   event.preventDefault();
   clearFlash();
@@ -231,7 +255,7 @@ function handleServerEditorClick(event) {
   renderServerRows(servers);
 }
 
-await initializePage(
+const page = await initializePage(
   "zones",
   "Zones",
   "Each zone can fill servers in order, rotate uploads across them, or mirror every upload to all enabled servers in the zone.",
@@ -239,8 +263,16 @@ await initializePage(
     requiresObjectDatabase: true,
   },
 );
-await refreshZones();
 fillForm(null);
+if (isObjectDatabaseUnavailable(page.status)) {
+  renderUnavailableState(page.status);
+} else {
+  try {
+    await refreshZones();
+  } catch (error) {
+    renderUnavailableState(error);
+  }
+}
 document.getElementById("zone-form")?.addEventListener("submit", handleSubmit);
 document.getElementById("zone-reset")?.addEventListener("click", () => fillForm(null));
 document.getElementById("zones-table")?.addEventListener("click", handleZoneTableClick);

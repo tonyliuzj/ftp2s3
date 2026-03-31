@@ -12,7 +12,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.admin import router as admin_router
 from app.api.s3 import router as s3_router
-from app.bootstrap import ensure_default_access_key, ensure_default_admin, ensure_default_regions
+from app.bootstrap import apply_pending_setup_if_possible
 from app.config import settings
 from app.database import ObjectDatabaseUnavailableError, init_db
 
@@ -42,9 +42,7 @@ app.add_middleware(
 @app.on_event("startup")
 def startup() -> None:
     init_db()
-    ensure_default_admin()
-    ensure_default_regions()
-    ensure_default_access_key()
+    apply_pending_setup_if_possible()
 
 
 def _format_validation_messages(errors: list[dict[str, object]]) -> list[str]:

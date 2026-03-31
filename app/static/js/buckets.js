@@ -2,11 +2,14 @@ import {
   apiFetch,
   clearFlash,
   escapeHtml,
+  getObjectDatabaseError,
   initializePage,
+  isObjectDatabaseUnavailable,
   loadBuckets,
   loadRegions,
   loadZones,
   renderTableRows,
+  setControlsDisabled,
   showFlash,
 } from "/panel/js/common.js";
 
@@ -18,12 +21,15 @@ const REGION_PATTERN = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$/;
 let currentBuckets = [];
 let currentRegions = [];
 
-function fillZoneOptions(zones) {
+function fillZoneOptions(zones, emptyLabel = "Create a zone first") {
   const select = document.getElementById("bucket-zone");
-  select.innerHTML = zones.map((zone) => `<option value="${zone.id}">${escapeHtml(zone.name)}</option>`).join("");
+  select.disabled = zones.length === 0;
+  select.innerHTML =
+    zones.map((zone) => `<option value="${zone.id}">${escapeHtml(zone.name)}</option>`).join("")
+    || `<option value="">${escapeHtml(emptyLabel)}</option>`;
 }
 
-function fillRegionOptions(regions, selectedCode = "") {
+function fillRegionOptions(regions, selectedCode = "", emptyLabel = "Create a region first") {
   const select = document.getElementById("bucket-region");
   const hasRegions = regions.length > 0;
   const knownCodes = new Set(regions.map((region) => region.code));
@@ -37,7 +43,7 @@ function fillRegionOptions(regions, selectedCode = "") {
   }
 
   select.disabled = !hasRegions && !selectedCode;
-  select.innerHTML = options.join("") || '<option value="">Create a region first</option>';
+  select.innerHTML = options.join("") || `<option value="">${escapeHtml(emptyLabel)}</option>`;
   select.value = selectedCode || regions[0]?.code || "";
 }
 
@@ -91,6 +97,23 @@ function renderBuckets(buckets) {
 async function refreshBuckets() {
   currentBuckets = await loadBuckets();
   renderBuckets(currentBuckets);
+}
+
+function renderUnavailableState(source) {
+  const message = getObjectDatabaseError(source);
+  currentBuckets = [];
+  currentRegions = [];
+  fillForm(null);
+  fillZoneOptions([], "Object metadata database unavailable");
+  fillRegionOptions([], "", "Object metadata database unavailable");
+  renderTableRows(
+    document.getElementById("buckets-table"),
+    "",
+    "Object metadata database unavailable. Reconnect PostgreSQL and refresh this page.",
+  );
+  setControlsDisabled("#bucket-form", true);
+  renderLegacyWarning(null);
+  showFlash(message, "warning");
 }
 
 async function handleSubmit(event) {
@@ -220,15 +243,23 @@ function isValidRegion(value) {
   return value.length >= 3 && value.length <= 32 && REGION_PATTERN.test(value);
 }
 
-await initializePage("buckets", "Buckets", "Buckets belong to zones, pick their region from the shared catalog, and write under a configured FTP base directory.", {
+const page = await initializePage("buckets", "Buckets", "Buckets belong to zones, pick their region from the shared catalog, and write under a configured FTP base directory.", {
   requiresObjectDatabase: true,
 });
-const [zones, regions] = await Promise.all([loadZones(), loadRegions()]);
-currentRegions = regions;
-fillZoneOptions(zones);
-fillRegionOptions(currentRegions, currentRegions[0]?.code || "");
-await refreshBuckets();
 fillForm(null);
+if (isObjectDatabaseUnavailable(page.status)) {
+  renderUnavailableState(page.status);
+} else {
+  try {
+    const [zones, regions] = await Promise.all([loadZones(), loadRegions()]);
+    currentRegions = regions;
+    fillZoneOptions(zones);
+    fillRegionOptions(currentRegions, currentRegions[0]?.code || "");
+    await refreshBuckets();
+  } catch (error) {
+    renderUnavailableState(error);
+  }
+}
 document.getElementById("bucket-form")?.addEventListener("submit", handleSubmit);
 document.getElementById("bucket-reset")?.addEventListener("click", () => fillForm(null));
 document.getElementById("buckets-table")?.addEventListener("click", handleTableClick);

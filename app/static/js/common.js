@@ -10,6 +10,37 @@ const navItems = [
 
 let cachedSystemStatus = null;
 
+export function isObjectDatabaseUnavailable(status) {
+  return status?.object_database_available === false;
+}
+
+export function getObjectDatabaseError(source) {
+  if (source instanceof Error && source.message) {
+    return source.message;
+  }
+
+  if (typeof source === "string" && source.trim()) {
+    return source.trim();
+  }
+
+  if (source && typeof source.object_database_error === "string" && source.object_database_error) {
+    return source.object_database_error;
+  }
+
+  return "Object metadata database is unavailable.";
+}
+
+export function setControlsDisabled(root, disabled = true) {
+  const element = typeof root === "string" ? document.querySelector(root) : root;
+  if (!element) {
+    return;
+  }
+
+  element.querySelectorAll("button, input, select, textarea").forEach((control) => {
+    control.disabled = disabled;
+  });
+}
+
 export async function apiFetch(path, options = {}) {
   const requestOptions = { credentials: "same-origin", ...options };
   const headers = new Headers(options.headers || {});
@@ -296,14 +327,6 @@ export async function initializePage(pageKey, title, subtitle, options = {}) {
 
   renderShell(pageKey, title, subtitle, user, status);
 
-  const page = navItems.find((item) => item.key === pageKey);
-  if ((options.requiresObjectDatabase || page?.requiresObjectDatabase) && status && !status.object_database_available) {
-    const target = new URL("/panel/pages/settings.html", window.location.origin);
-    target.searchParams.set("object-db", "unavailable");
-    window.location.replace(target.toString());
-    throw new Error(status.object_database_error || "Object metadata database is unavailable.");
-  }
-
   return { user, status };
 }
 
@@ -365,8 +388,8 @@ function renderShell(pageKey, title, subtitle, user, status = null) {
           .map(
             (item) => `
               <a
-                class="nav-link ${item.key === pageKey ? "active" : ""} ${!objectDatabaseAvailable && item.requiresObjectDatabase ? "disabled" : ""}"
-                href="${!objectDatabaseAvailable && item.requiresObjectDatabase ? "/panel/pages/settings.html?object-db=unavailable" : item.href}"
+                class="nav-link ${item.key === pageKey ? "active" : ""}"
+                href="${item.href}"
               >
                 <span>${item.label}</span>
               </a>

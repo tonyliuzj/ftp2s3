@@ -543,32 +543,61 @@ configure_existing_postgresql() {
 
 prompt_postgresql_mode() {
   local install_mode="$1"
-  local postgres_choice
 
   echo
-  echo "PostgreSQL options:"
+  echo "PostgreSQL setup:"
   if [ "${install_mode}" = "docker" ]; then
-    echo "1) Use the Docker Compose PostgreSQL container"
-    echo "2) Use an existing PostgreSQL instance"
-    read -r -p "Select a PostgreSQL option [1-2]: " postgres_choice
-
-    case "${postgres_choice}" in
-      1) configure_compose_postgresql ;;
-      2) configure_existing_postgresql "${install_mode}" ;;
-      *) fail "Invalid PostgreSQL option." ;;
-    esac
+    if confirm_default_no "Set up local PostgreSQL with Docker Compose?"; then
+      configure_compose_postgresql
+    else
+      configure_existing_postgresql "${install_mode}"
+    fi
     return
   fi
 
-  echo "1) Use an existing PostgreSQL instance"
-  echo "2) Install and manage PostgreSQL on this host"
-  read -r -p "Select a PostgreSQL option [1-2]: " postgres_choice
+  if confirm_default_no "Set up local PostgreSQL on this host?"; then
+    configure_local_postgresql "${install_mode}"
+  else
+    configure_existing_postgresql "${install_mode}"
+  fi
+}
 
-  case "${postgres_choice}" in
-    1) configure_existing_postgresql "${install_mode}" ;;
-    2) configure_local_postgresql "${install_mode}" ;;
-    *) fail "Invalid PostgreSQL option." ;;
+postgres_setup_summary() {
+  case "${POSTGRES_MODE}" in
+    compose)
+      echo "Local Docker Compose PostgreSQL"
+      ;;
+    host)
+      echo "Local PostgreSQL on this host"
+      ;;
+    existing)
+      echo "Existing PostgreSQL instance"
+      ;;
+    *)
+      echo "${POSTGRES_MODE}"
+      ;;
   esac
+}
+
+print_install_summary() {
+  local install_mode="$1"
+
+  echo
+  echo "========== Install Summary =========="
+  echo "Mode: ${install_mode}"
+  echo "Install directory: ${INSTALL_DIR}"
+  echo "URL: ${PUBLIC_BASE_URL}"
+  echo "PostgreSQL: $(postgres_setup_summary)"
+  echo "Admin username: ${ADMIN_USERNAME}"
+
+  if [ "${install_mode}" = "direct" ]; then
+    echo "Service: ${SYSTEMD_SERVICE_NAME}"
+  else
+    echo "Docker Compose project: ${DOCKER_COMPOSE_PROJECT}"
+  fi
+
+  echo "Environment file: ${INSTALL_DIR}/${ENV_FILE_NAME}"
+  echo "====================================="
 }
 
 write_env_file() {
@@ -780,11 +809,7 @@ install_direct_ftp2s3() {
   write_state_file
 
   log "Direct install complete."
-  log "Service: ${SYSTEMD_SERVICE_NAME}"
-  log "URL: ${PUBLIC_BASE_URL}"
-  log "PostgreSQL mode: ${POSTGRES_MODE}"
-  log "Default admin username: ${ADMIN_USERNAME}"
-  log "Default admin password: ${ADMIN_PASSWORD}"
+  print_install_summary "direct"
 }
 
 install_docker_ftp2s3() {
@@ -801,11 +826,7 @@ install_docker_ftp2s3() {
   write_state_file
 
   log "Docker install complete."
-  log "Docker Compose project: ${DOCKER_COMPOSE_PROJECT}"
-  log "URL: ${PUBLIC_BASE_URL}"
-  log "PostgreSQL mode: ${POSTGRES_MODE}"
-  log "Default admin username: ${ADMIN_USERNAME}"
-  log "Default admin password: ${ADMIN_PASSWORD}"
+  print_install_summary "docker"
 }
 
 install_ftp2s3() {

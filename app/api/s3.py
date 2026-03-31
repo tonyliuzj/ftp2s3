@@ -2,25 +2,34 @@ from __future__ import annotations
 
 import mimetypes
 from ftplib import error_perm
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.database import get_db
+from app.database import get_db, get_site_db
 from app.http_helpers import iter_file_chunks, request_to_spooled_file
 from app.pathing import InvalidPathError
 from app.s3_auth import require_s3_signature
+from app.services.app_settings import get_effective_ftp_timeout
 from app.services.storage_manager import InsufficientZoneStorageError, StorageManager, StorageOperationError
 
 
-router = APIRouter(tags=["s3-lite"], dependencies=[Depends(require_s3_signature)])
+router = APIRouter(tags=["s3-lite"])
 
 
-@router.get("/")
-def list_buckets(db: Session = Depends(get_db)):
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+def _is_browser_panel_request(request: Request) -> bool:
+    if request.headers.get("authorization") or "X-Amz-Signature" in request.query_params:
+        return False
+
+    accept = request.headers.get("accept", "").lower()
+    return "text/html" in accept
+
+
+def _serialize_bucket_listing(db: Session) -> dict[str, Any]:
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     buckets = manager.list_buckets()
     return {
         "note": "This endpoint accepts SigV4 credentials and presigned X-Amz query URLs, uses path-style bucket URLs, and still returns JSON instead of AWS XML.",
@@ -36,7 +45,24 @@ def list_buckets(db: Session = Depends(get_db)):
     }
 
 
-@router.get("/{bucket_name}")
+@router.get("/")
+async def list_buckets(request: Request):
+    if _is_browser_panel_request(request):
+        return RedirectResponse(url=f"{settings.panel_mount_path}/pages/login.html", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+
+    db_generator = get_db()
+    site_db_generator = get_site_db()
+    try:
+        db = next(db_generator)
+        site_db = next(site_db_generator)
+        await require_s3_signature(request=request, db=db, site_db=site_db, bucket_name=None)
+        return _serialize_bucket_listing(db)
+    finally:
+        site_db_generator.close()
+        db_generator.close()
+
+
+@router.get("/{bucket_name}", dependencies=[Depends(require_s3_signature)])
 def list_objects(
     bucket_name: str,
     response: Response,
@@ -44,7 +70,7 @@ def list_objects(
     location: str | None = None,
     db: Session = Depends(get_db),
 ):
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         bucket, _zone = manager.get_bucket_and_zone(bucket_name)
         response.headers["x-amz-bucket-region"] = bucket.region
@@ -74,7 +100,7 @@ def list_objects(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not connect to the FTP server: {exc}") from exc
 
 
-@router.put("/{bucket_name}/{object_path:path}")
+@router.put("/{bucket_name}/{object_path:path}", dependencies=[Depends(require_s3_signature)])
 async def upload_object(
     bucket_name: str,
     object_path: str,
@@ -82,7 +108,7 @@ async def upload_object(
     response: Response,
     db: Session = Depends(get_db),
 ):
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         temp_file, size = await request_to_spooled_file(request)
         row = manager.put_object(bucket_name, object_path, temp_file, size=size)
@@ -108,9 +134,9 @@ async def upload_object(
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not connect to the FTP server: {exc}") from exc
 
 
-@router.get("/{bucket_name}/{object_path:path}")
+@router.get("/{bucket_name}/{object_path:path}", dependencies=[Depends(require_s3_signature)])
 def download_object(bucket_name: str, object_path: str, request: Request, db: Session = Depends(get_db)) -> StreamingResponse:
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         file_obj, _row = manager.download_object(bucket_name, object_path)
         headers = {
@@ -130,9 +156,9 @@ def download_object(bucket_name: str, object_path: str, request: Request, db: Se
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not connect to the FTP server: {exc}") from exc
 
 
-@router.delete("/{bucket_name}/{object_path:path}")
+@router.delete("/{bucket_name}/{object_path:path}", dependencies=[Depends(require_s3_signature)])
 def delete_object(bucket_name: str, object_path: str, request: Request, db: Session = Depends(get_db)):
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         manager.delete_object(bucket_name, object_path)
         return {
@@ -151,9 +177,9 @@ def delete_object(bucket_name: str, object_path: str, request: Request, db: Sess
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not connect to the FTP server: {exc}") from exc
 
 
-@router.head("/{bucket_name}")
+@router.head("/{bucket_name}", dependencies=[Depends(require_s3_signature)])
 def head_bucket(bucket_name: str, response: Response, db: Session = Depends(get_db)) -> Response:
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         bucket, _zone = manager.get_bucket_and_zone(bucket_name)
         response.headers["x-amz-bucket-region"] = bucket.region
@@ -164,9 +190,9 @@ def head_bucket(bucket_name: str, response: Response, db: Session = Depends(get_
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Could not connect to the FTP server: {exc}") from exc
 
 
-@router.head("/{bucket_name}/{object_path:path}")
+@router.head("/{bucket_name}/{object_path:path}", dependencies=[Depends(require_s3_signature)])
 def head_object(bucket_name: str, object_path: str, response: Response, db: Session = Depends(get_db)) -> Response:
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         bucket, _zone = manager.get_bucket_and_zone(bucket_name)
         normalized_info = manager.get_object_file_info(bucket_name, object_path)

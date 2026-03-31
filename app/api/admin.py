@@ -41,6 +41,9 @@ from app.schemas import (
     SyncRepairResponse,
     SyncStatusResponse,
     SystemStatusResponse,
+    SetupRequest,
+    SetupResponse,
+    SetupStatusResponse,
     SiteSettingsRead,
     SiteSettingsUpdate,
     ZoneServerRead,
@@ -50,7 +53,7 @@ from app.schemas import (
     ZoneRead,
     ZoneUpdate,
 )
-from app.security import verify_password
+from app.security import hash_password, verify_password
 from app.services.access_keys import (
     ensure_single_default_key,
     generate_access_key_id,
@@ -61,9 +64,14 @@ from app.services.access_keys import (
     set_default_access_key,
 )
 from app.services.app_settings import (
+    apply_pending_object_configuration,
+    clear_pending_object_configuration,
+    get_effective_ftp_timeout,
     load_effective_s3_settings,
     load_object_settings,
+    load_pending_object_configuration,
     load_site_settings,
+    update_pending_object_configuration,
     update_object_settings,
     update_site_settings,
 )
@@ -79,6 +87,7 @@ def _site_settings_to_schema(site_settings) -> SiteSettingsRead:
     return SiteSettingsRead(
         public_base_url=site_settings.public_base_url,
         object_database_url=site_settings.object_database_url,
+        ftp_timeout=site_settings.ftp_timeout,
     )
 
 
@@ -89,6 +98,47 @@ def _object_settings_to_schema(object_settings) -> ObjectSettingsRead:
         s3_require_sigv4=object_settings.s3_require_sigv4,
         s3_max_clock_skew_seconds=object_settings.s3_max_clock_skew_seconds,
         s3_presign_expiry_seconds=object_settings.s3_presign_expiry_seconds,
+    )
+
+
+def _object_defaults_to_setup_status(site_settings, pending_object_settings, object_settings) -> SetupStatusResponse:
+    active_object_settings = object_settings or pending_object_settings or type(
+        "SetupObjectDefaults",
+        (),
+        {
+            "s3_service_name": settings.s3_service_name,
+            "s3_default_region": settings.s3_default_region,
+            "s3_require_sigv4": settings.s3_require_sigv4,
+            "s3_max_clock_skew_seconds": settings.s3_max_clock_skew_seconds,
+            "s3_presign_expiry_seconds": settings.s3_presign_expiry_seconds,
+        },
+    )()
+    return SetupStatusResponse(
+        needs_setup=True,
+        app_name=settings.app_name,
+        object_database_url=site_settings.object_database_url,
+        postgres_host=settings.postgres_host,
+        postgres_db=site_settings.postgres_db,
+        postgres_user=site_settings.postgres_user,
+        postgres_password=site_settings.postgres_password,
+        default_admin_username=settings.default_admin_username,
+        default_admin_password=settings.default_admin_password,
+        public_base_url=site_settings.public_base_url,
+        s3_service_name=active_object_settings.s3_service_name,
+        s3_default_region=active_object_settings.s3_default_region,
+        s3_access_key_id=(
+            pending_object_settings.s3_access_key_id
+            if pending_object_settings is not None
+            else settings.s3_access_key_id
+        ),
+        s3_secret_access_key=(
+            pending_object_settings.s3_secret_access_key
+            if pending_object_settings is not None
+            else settings.s3_secret_access_key
+        ),
+        s3_require_sigv4=active_object_settings.s3_require_sigv4,
+        s3_max_clock_skew_seconds=active_object_settings.s3_max_clock_skew_seconds,
+        s3_presign_expiry_seconds=active_object_settings.s3_presign_expiry_seconds,
     )
 
 
@@ -280,8 +330,164 @@ def _region_to_schema(db: Session, region: Region) -> RegionRead:
     )
 
 
+@router.get("/setup/status", response_model=SetupStatusResponse)
+def setup_status(
+    request: Request,
+    site_db: Session = Depends(get_site_db),
+) -> SetupStatusResponse:
+    request_base_url = str(request.base_url).rstrip("/")
+    site_settings = load_site_settings(site_db, request_base_url=request_base_url)
+    pending_object_settings = load_pending_object_configuration(site_db)
+    admin_user_total = int(site_db.execute(select(func.count(AdminUser.id))).scalar_one() or 0)
+    if admin_user_total > 0:
+        return SetupStatusResponse(
+            needs_setup=False,
+            app_name=settings.app_name,
+            object_database_url="",
+            postgres_host=settings.postgres_host,
+            postgres_db="",
+            postgres_user="",
+            postgres_password="",
+            default_admin_username="",
+            default_admin_password="",
+            public_base_url="",
+            s3_service_name=settings.s3_service_name,
+            s3_default_region=settings.s3_default_region,
+            s3_access_key_id="",
+            s3_secret_access_key="",
+            s3_require_sigv4=settings.s3_require_sigv4,
+            s3_max_clock_skew_seconds=settings.s3_max_clock_skew_seconds,
+            s3_presign_expiry_seconds=settings.s3_presign_expiry_seconds,
+        )
+
+    object_settings = None
+
+    object_database_status = get_object_database_status(core_db=site_db)
+    if object_database_status.available:
+        try:
+            configure_object_database(database_url=object_database_status.database_url)
+            with SessionLocal() as object_db:
+                if apply_pending_object_configuration(site_db, object_db):
+                    object_db.commit()
+                    site_db.commit()
+                object_settings = load_object_settings(object_db)
+        except Exception:
+            site_db.rollback()
+            object_database_status = get_object_database_status(core_db=site_db)
+
+    status_payload = _object_defaults_to_setup_status(site_settings, pending_object_settings, object_settings)
+    return status_payload
+
+
+@router.post("/setup", response_model=SetupResponse)
+def complete_initial_setup(
+    payload: SetupRequest,
+    request: Request,
+    site_db: Session = Depends(get_site_db),
+) -> SetupResponse:
+    existing_admin = site_db.execute(select(AdminUser).limit(1)).scalar_one_or_none()
+    if existing_admin is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Initial setup has already been completed.")
+
+    existing_username = site_db.execute(select(AdminUser).where(AdminUser.username == payload.admin_username)).scalar_one_or_none()
+    if existing_username is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Admin username already exists.")
+
+    site_values = {
+        "public_base_url": payload.public_base_url,
+        "object_database_url": payload.object_database_url,
+        "ftp_timeout": settings.ftp_timeout,
+        "postgres_db": payload.postgres_db,
+        "postgres_user": payload.postgres_user,
+        "postgres_password": payload.postgres_password,
+    }
+    object_values = {
+        "s3_service_name": payload.s3_service_name,
+        "s3_default_region": payload.s3_default_region,
+        "s3_access_key_id": payload.s3_access_key_id,
+        "s3_secret_access_key": payload.s3_secret_access_key,
+        "s3_require_sigv4": payload.s3_require_sigv4,
+        "s3_max_clock_skew_seconds": payload.s3_max_clock_skew_seconds,
+        "s3_presign_expiry_seconds": payload.s3_presign_expiry_seconds,
+    }
+
+    object_database_available = False
+    object_database_error: str | None = None
+    try:
+        update_site_settings(site_db, site_values, commit=False)
+
+        try:
+            configure_object_database(core_db=site_db)
+            with SessionLocal() as object_db:
+                update_object_settings(object_db, object_values, commit=False)
+                region = object_db.execute(select(Region).where(Region.code == payload.s3_default_region)).scalar_one_or_none()
+                if region is None:
+                    object_db.add(Region(code=payload.s3_default_region, name=payload.s3_default_region))
+
+                access_key = get_access_key_by_access_key_id(object_db, payload.s3_access_key_id)
+                if access_key is None:
+                    access_key = S3AccessKey(
+                        name="Default Access Key",
+                        access_key_id=payload.s3_access_key_id,
+                        secret_access_key=payload.s3_secret_access_key,
+                        enabled=True,
+                        is_default=True,
+                    )
+                    object_db.add(access_key)
+                else:
+                    access_key.secret_access_key = payload.s3_secret_access_key
+                    access_key.enabled = True
+                    access_key.is_default = True
+
+                object_db.flush()
+                set_default_access_key(object_db, access_key)
+                ensure_single_default_key(object_db)
+                object_db.commit()
+            clear_pending_object_configuration(site_db, commit=False)
+            object_database_available = True
+        except Exception as exc:
+            update_pending_object_configuration(site_db, object_values, commit=False)
+            object_database_error = str(exc)
+
+        admin_user = AdminUser(
+            username=payload.admin_username,
+            password_hash=hash_password(payload.admin_password),
+        )
+        site_db.add(admin_user)
+        site_db.commit()
+        site_db.refresh(admin_user)
+
+        request.session.clear()
+        request.session["user_id"] = admin_user.id
+    except HTTPException:
+        site_db.rollback()
+        raise
+    except Exception as exc:
+        site_db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if object_database_available:
+        return SetupResponse(
+            message="Initial setup complete.",
+            object_database_available=True,
+        )
+
+    return SetupResponse(
+        message="Initial setup complete. PostgreSQL settings were saved and will be applied when the object database becomes reachable.",
+        object_database_available=False,
+        object_database_error=object_database_error,
+    )
+
+
 @router.post("/login", response_model=LoginResponse)
 def admin_login(payload: LoginRequest, request: Request, db: Session = Depends(get_site_db)) -> LoginResponse:
+    admin_count = int(db.execute(select(func.count(AdminUser.id))).scalar_one() or 0)
+    if admin_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Initial setup is required before anyone can log in.",
+        )
+
     user = db.execute(select(AdminUser).where(AdminUser.username == payload.username)).scalar_one_or_none()
     if user is None or not verify_password(payload.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid username or password.")
@@ -329,15 +535,20 @@ def save_site_settings(
 
 @router.get("/settings/object", response_model=ObjectSettingsRead)
 def get_object_settings(
+    site_db: Session = Depends(get_site_db),
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> ObjectSettingsRead:
+    if apply_pending_object_configuration(site_db, db):
+        db.commit()
+        site_db.commit()
     return _object_settings_to_schema(load_object_settings(db))
 
 
 @router.put("/settings/object", response_model=ObjectSettingsRead)
 def save_object_settings(
     payload: ObjectSettingsUpdate,
+    site_db: Session = Depends(get_site_db),
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> ObjectSettingsRead:
@@ -346,10 +557,13 @@ def save_object_settings(
         region = db.execute(select(Region).where(Region.code == payload.s3_default_region)).scalar_one_or_none()
         if region is None:
             db.add(Region(code=payload.s3_default_region, name=payload.s3_default_region))
+        clear_pending_object_configuration(site_db, commit=False)
         db.commit()
+        site_db.commit()
         return _object_settings_to_schema(object_settings)
     except Exception as exc:
         db.rollback()
+        site_db.rollback()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
@@ -787,7 +1001,7 @@ def list_bucket_objects(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> BucketObjectsResponse:
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         data = manager.list_objects_for_bucket(bucket_name, prefix=prefix)
         data["objects"] = [_object_to_schema(db, row) for row in data["objects"]]
@@ -811,7 +1025,7 @@ def search_bucket_objects(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> SearchResponse:
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         results = manager.search_objects(bucket_name, q)
         return SearchResponse(bucket=bucket_name, query=q, objects=[_object_to_schema(db, row) for row in results], count=len(results))
@@ -831,7 +1045,7 @@ def upload_object_via_admin(
     if not effective_object_key:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Object key is required.")
 
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         row = manager.put_object(bucket_name, effective_object_key, file.file)
         return {"message": "Upload complete.", "object": _object_to_schema(db, row)}
@@ -856,7 +1070,7 @@ def delete_object_via_admin(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> MessageResponse:
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         manager.delete_object(bucket_name, object_path)
         return MessageResponse(message="Object deleted.")
@@ -879,7 +1093,7 @@ def download_object_via_admin(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> StreamingResponse:
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         file_obj, _row = manager.download_object(bucket_name, object_path)
         headers = {"Content-Disposition": f'attachment; filename="{basename(object_path)}"'}
@@ -901,7 +1115,7 @@ def view_object_via_admin(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> StreamingResponse:
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         file_obj, _row = manager.download_object(bucket_name, object_path)
         media_type = mimetypes.guess_type(object_path)[0] or "application/octet-stream"
@@ -927,7 +1141,7 @@ def presign_object_via_admin(
     site_db: Session = Depends(get_site_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> PresignResponse:
-    manager = StorageManager(db=db, ftp_timeout=settings.ftp_timeout)
+    manager = StorageManager(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         bucket, _zone = manager.get_bucket_and_zone(bucket_name)
         normalized_object_key = normalize_object_key(payload.object_key)
@@ -971,7 +1185,7 @@ def preview_bucket_sync(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> SyncPreviewResponse:
-    service = SyncService(db=db, ftp_timeout=settings.ftp_timeout)
+    service = SyncService(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         return SyncPreviewResponse.model_validate(service.compare_ftp_to_db(bucket_name))
     except ValueError as exc:
@@ -988,7 +1202,7 @@ def repair_bucket_sync(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> SyncRepairResponse:
-    service = SyncService(db=db, ftp_timeout=settings.ftp_timeout)
+    service = SyncService(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         return SyncRepairResponse.model_validate(service.repair_bucket(bucket_name))
     except ValueError as exc:
@@ -1005,7 +1219,7 @@ def bucket_sync_status(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> SyncStatusResponse:
-    service = SyncService(db=db, ftp_timeout=settings.ftp_timeout)
+    service = SyncService(db=db, ftp_timeout=get_effective_ftp_timeout())
     return SyncStatusResponse.model_validate(service.get_status(bucket_name))
 
 
@@ -1015,7 +1229,7 @@ def preview_bucket_zone_sync(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> ZoneSyncPreviewResponse:
-    service = ZoneSyncService(db=db, ftp_timeout=settings.ftp_timeout)
+    service = ZoneSyncService(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         return ZoneSyncPreviewResponse.model_validate(service.compare_bucket(bucket_name))
     except ValueError as exc:
@@ -1036,7 +1250,7 @@ def repair_bucket_zone_sync(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ) -> ZoneSyncRepairResponse:
-    service = ZoneSyncService(db=db, ftp_timeout=settings.ftp_timeout)
+    service = ZoneSyncService(db=db, ftp_timeout=get_effective_ftp_timeout())
     try:
         return ZoneSyncRepairResponse.model_validate(service.repair_bucket(bucket_name))
     except ValueError as exc:
@@ -1056,7 +1270,7 @@ def rescan_all_buckets(
     db: Session = Depends(get_db),
     _admin_user: AdminUser = Depends(get_current_admin),
 ):
-    service = SyncService(db=db, ftp_timeout=settings.ftp_timeout)
+    service = SyncService(db=db, ftp_timeout=get_effective_ftp_timeout())
     return {"results": service.rescan_all_buckets()}
 
 
@@ -1092,9 +1306,12 @@ def system_status(
         try:
             configure_object_database(database_url=object_database_status.database_url)
             with SessionLocal() as db:
+                if apply_pending_object_configuration(site_db, db):
+                    db.commit()
+                    site_db.commit()
                 effective_settings = load_effective_s3_settings(site_db, db, request_base_url=request_base_url)
                 default_access_key = get_default_access_key(db)
-                sync_service = SyncService(db=db, ftp_timeout=settings.ftp_timeout)
+                sync_service = SyncService(db=db, ftp_timeout=site_settings.ftp_timeout)
                 object_counts = {
                     "s3_service_name": effective_settings.s3_service_name,
                     "s3_default_region": effective_settings.s3_default_region,
@@ -1114,6 +1331,7 @@ def system_status(
                     "sync_statuses": [SyncStatusResponse.model_validate(item) for item in sync_service.list_statuses()],
                 }
         except Exception as exc:
+            site_db.rollback()
             object_database_status = get_object_database_status(core_db=site_db)
             if object_database_status.available:
                 object_database_status.available = False
