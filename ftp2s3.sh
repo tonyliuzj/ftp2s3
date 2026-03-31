@@ -22,7 +22,8 @@ VENV_DIR="${INSTALL_DIR}/venv"
 DOCKER_APP_IMAGE="${PROJECT_SLUG}-app:latest"
 DOCKER_LEGACY_IMAGE="${PROJECT_SLUG}:latest"
 DOCKER_LEGACY_CONTAINER="${PROJECT_SLUG}"
-DOCKER_COMPOSE_FILE="${INSTALL_DIR}/docker-compose.yml"
+DOCKER_COMPOSE_APP_FILE="${INSTALL_DIR}/docker-compose.yml"
+DOCKER_COMPOSE_POSTGRES_FILE="${INSTALL_DIR}/postgres/docker-compose.yml"
 DOCKER_COMPOSE_PROJECT="${PROJECT_SLUG}"
 DOCKER_APP_SERVICE="app"
 DOCKER_POSTGRES_SERVICE="postgres"
@@ -244,18 +245,39 @@ ensure_docker_compose_available() {
   fi
 }
 
-docker_compose() {
+docker_compose_with_files() {
+  local include_postgres="$1"
+  shift
+  local compose_args=(-p "${DOCKER_COMPOSE_PROJECT}" -f "${DOCKER_COMPOSE_APP_FILE}")
+
+  if [ "${include_postgres}" = "true" ] && [ -f "${DOCKER_COMPOSE_POSTGRES_FILE}" ]; then
+    compose_args+=(-f "${DOCKER_COMPOSE_POSTGRES_FILE}")
+  fi
+
   if docker compose version >/dev/null 2>&1; then
-    docker compose -p "${DOCKER_COMPOSE_PROJECT}" -f "${DOCKER_COMPOSE_FILE}" "$@"
+    docker compose "${compose_args[@]}" "$@"
     return
   fi
 
   if command_exists docker-compose; then
-    docker-compose -p "${DOCKER_COMPOSE_PROJECT}" -f "${DOCKER_COMPOSE_FILE}" "$@"
+    docker-compose "${compose_args[@]}" "$@"
     return
   fi
 
   fail "Docker Compose is not available."
+}
+
+docker_compose() {
+  if [ "${POSTGRES_MODE}" = "compose" ]; then
+    docker_compose_with_files "true" "$@"
+    return
+  fi
+
+  docker_compose_with_files "false" "$@"
+}
+
+docker_compose_all() {
+  docker_compose_with_files "true" "$@"
 }
 
 detect_nologin_shell() {
@@ -616,7 +638,7 @@ prompt_postgresql_mode() {
   echo
   echo "PostgreSQL setup:"
   if [ "${install_mode}" = "docker" ]; then
-    if confirm_default_no "Set up local PostgreSQL with Docker Compose? Choose No to finish PostgreSQL configuration from the setup screen."; then
+    if confirm_default_no "Set up local PostgreSQL with Docker Compose? Choose No to skip PostgreSQL questions here and finish them on the setup screen."; then
       configure_compose_postgresql
     else
       configure_existing_postgresql "${install_mode}"
@@ -624,7 +646,7 @@ prompt_postgresql_mode() {
     return
   fi
 
-  if confirm_default_no "Set up local PostgreSQL on this host? Choose No to finish PostgreSQL configuration from the setup screen."; then
+  if confirm_default_no "Set up local PostgreSQL on this host? Choose No to skip PostgreSQL questions here and finish them on the setup screen."; then
     configure_local_postgresql "${install_mode}"
   else
     configure_existing_postgresql "${install_mode}"
@@ -795,7 +817,7 @@ wait_for_compose_postgresql() {
 }
 
 run_docker_stack() {
-  docker_compose down --remove-orphans >/dev/null 2>&1 || true
+  docker_compose_all down --remove-orphans >/dev/null 2>&1 || true
   docker rm -f "${DOCKER_LEGACY_CONTAINER}" >/dev/null 2>&1 || true
   docker image rm "${DOCKER_LEGACY_IMAGE}" >/dev/null 2>&1 || true
 
@@ -808,8 +830,8 @@ run_docker_stack() {
 }
 
 stop_and_remove_docker() {
-  if [ -f "${DOCKER_COMPOSE_FILE}" ]; then
-    docker_compose down --remove-orphans >/dev/null 2>&1 || true
+  if [ -f "${DOCKER_COMPOSE_APP_FILE}" ]; then
+    docker_compose_all down --remove-orphans >/dev/null 2>&1 || true
   fi
 
   docker rm -f "${DOCKER_LEGACY_CONTAINER}" >/dev/null 2>&1 || true
